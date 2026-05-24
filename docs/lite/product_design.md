@@ -1,31 +1,31 @@
-# Lite 产品设计
+# Lite Product Design
 
-## 定位
+## Positioning
 
-Keystats Lite 是面向普通 Mac 用户的独立菜单栏统计工具，提供轻量、低打扰的键盘使用概览。
+Keystats Lite is a standalone menu bar statistics tool for everyday Mac users. It provides a lightweight, low-interruption overview of keyboard usage.
 
-## 核心用户价值
+## Core User Value
 
-- 在菜单栏实时查看今日按键次数
-- 点击菜单栏查看今日概览
-- 查看最近 7 天趋势
-- 查看今日 Top Apps
-- 管理统计模式和本地数据
+- View today's key count in the menu bar in real time
+- Click the menu bar item to view today's overview
+- View trends for the last 7 days
+- View today's Top Apps
+- Manage statistics mode and local data
 
-## 功能清单
+## Feature List
 
-| 功能 | 优先级 | 描述 |
-|------|--------|------|
-| Menu Bar 图标 | P0 | 实时显示当日按键次数 |
-| 点击展开面板 | P0 | 显示当日统计 |
-| 当日统计 | P0 | 总按键数、活跃时长、Top 3 应用 |
-| 权限引导 | P0 | 引导用户授予 Input Monitoring |
-| 统计模式切换 | P0 | 支持数字统计模式 / 按键明细模式 |
-| 数据清除 | P0 | 清除本地统计数据 |
-| 开机自启 | P1 | 可选开机启动 |
-| 数据保留 | P1 | 展示最近 7 天，聚合数据保留 90 天，明细数据保留 7 天 |
+| Feature | Priority | Description |
+|---------|----------|-------------|
+| Menu Bar icon | P0 | Display today's key count in real time |
+| Click-to-expand panel | P0 | Show today's statistics |
+| Today statistics | P0 | Total keys, active time, Top 3 apps |
+| Permission guide | P0 | Guide users to grant Input Monitoring |
+| Statistics mode switch | P0 | Support aggregate statistics mode / key detail mode |
+| Data clearing | P0 | Clear local statistics data |
+| Launch at login | P1 | Optional launch at login |
+| Data retention | P1 | Show the last 7 days, retain aggregate data for 90 days, retain detail data for 7 days |
 
-## UI 草案
+## UI Draft
 
 ```text
 Menu Bar:
@@ -45,12 +45,12 @@ Wed  ████████████ 13.1k
 Settings
 ```
 
-## 权限失败状态
+## Permission Failure State
 
-未授权时，不展示误导性的零数据。应展示：
+When permission is not granted, do not show misleading zero data. The UI should show:
 
-- 权限状态
-- 为什么需要权限
-- 如何打开系统设置授权
-- 授权后如何继续
+- Permission status
+- Why the permission is needed
+- How to open System Settings and grant permission
+- How to continue after granting permission
 

@@ -1,6 +1,6 @@
-# Core 技术方案
+# Core Technical Design
 
-## 模块组成
+## Modules
 
 ```text
 KeystatsCore
@@ -18,7 +18,7 @@ KeystatsCore
 └── Models
 ```
 
-## 数据流
+## Data Flow
 
 ```text
 Keyboard event
@@ -33,26 +33,26 @@ Keyboard event
   -> daily_stats generated lazily
 ```
 
-按键明细模式会额外将事件加入内存明细队列，并随 flush 批量写入 `key_events`。
+Key detail mode additionally appends events to an in-memory detail queue and batch-writes them to `key_events` during flush.
 
-## 权限
+## Permissions
 
-`CGEventTap` 监听全局键盘事件需要 Input Monitoring 权限。
+Global keyboard listening through `CGEventTap` requires Input Monitoring permission.
 
-Core 要求：
+Core requirements:
 
-- 启动监听前检查权限
-- daemon 启动后再次检查权限
-- 运行中权限被撤销时停用 event tap
-- 状态进入 `permission_required`
+- Check permissions before starting listening
+- Check permissions again after the daemon starts
+- Disable the event tap if permissions are revoked at runtime
+- Enter the `permission_required` state when listening is not allowed
 
-Accessibility 首版不是必需权限，仅作为后续增强窗口上下文的能力。
+Accessibility is not required for the first version. It is reserved for future window-context enhancements.
 
-## 前台应用识别
+## Foreground App Detection
 
-首版通过 `NSWorkspace` 获取前台应用名称和 bundle id。
+The first version uses `NSWorkspace` to read the foreground app name and bundle id.
 
-失败时统一写入：
+On failure, Core writes:
 
 - `app_bundle_id = unknown`
 - `app_name = Unknown`
@@ -126,7 +126,7 @@ CREATE TABLE daily_stats (
 );
 ```
 
-## SQLite 运行参数
+## SQLite Runtime Settings
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -134,19 +134,19 @@ PRAGMA busy_timeout = 5000;
 PRAGMA foreign_keys = ON;
 ```
 
-写入策略：
+Write strategy:
 
-- daemon 是唯一写入者
-- 单写者队列串行执行写入
-- `minute_stats` 和 `key_usage_stats` 使用 `INSERT ... ON CONFLICT ... DO UPDATE`
-- flush 使用事务
-- CLI / Lite 查询使用只读连接
+- The daemon is the only writer
+- A single-writer queue serializes all writes
+- `minute_stats` and `key_usage_stats` use `INSERT ... ON CONFLICT ... DO UPDATE`
+- Flush operations run inside transactions
+- CLI and Lite use read-only connections for queries
 
-## 聚合策略
+## Aggregation Strategy
 
-- 每次按键实时进入内存聚合
-- 默认每分钟 flush 到 SQLite
-- `minute_stats` 和 `key_usage_stats` 是聚合事实表
-- `daily_stats` 是查询加速表，可从聚合事实表重建
-- daemon 启动时补齐最近 7 天缺失的 `daily_stats`
+- Every key event enters in-memory aggregation in real time
+- Data is flushed to SQLite every minute by default
+- `minute_stats` and `key_usage_stats` are aggregate fact tables
+- `daily_stats` is a query cache and can be rebuilt from aggregate fact tables
+- On startup, the daemon backfills missing `daily_stats` records for the last 7 days
 

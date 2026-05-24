@@ -1,6 +1,6 @@
-# CLI 技术方案
+# CLI Technical Design
 
-## 架构
+## Architecture
 
 ```text
 keystats CLI
@@ -24,49 +24,49 @@ keystats CLI
     └── DaemonControlClient
 ```
 
-## Daemon 生命周期
+## Daemon Lifecycle
 
-CLI daemon 使用当前用户级 `launchd` LaunchAgent 管理。
+The CLI daemon is managed by a user-level `launchd` LaunchAgent.
 
-| 配置项 | 值 |
-|--------|----|
+| Configuration | Value |
+|---------------|-------|
 | Label | `com.keystats.daemon` |
-| ProgramArguments | `keystats daemon run` 的绝对路径参数 |
+| ProgramArguments | Absolute path arguments for `keystats daemon run` |
 | RunAtLoad | `true` |
 | KeepAlive | `true` |
 | StandardOutPath | `~/.keystats/keystats.log` |
 | StandardErrorPath | `~/.keystats/keystats.log` |
 
-安装后不会自动运行。用户第一次执行 `keystats start` 时才安装并加载 LaunchAgent；之后该 LaunchAgent 会在用户登录时继续运行，直到 `keystats stop` 卸载。
+The app does not run automatically after installation. The first `keystats start` command installs and loads the LaunchAgent. After that, the LaunchAgent continues running after user login until `keystats stop` unloads it.
 
-## Daemon 状态
+## Daemon States
 
-| 状态 | 含义 |
-|------|------|
-| `stopped` | 未运行 |
-| `running` | 正在监听和统计 |
-| `paused` | 进程运行，但 event tap 停用 |
-| `permission_required` | 权限不足，无法监听 |
-| `error` | 运行异常，需要 `doctor` 诊断 |
+| State | Meaning |
+|-------|---------|
+| `stopped` | Not running |
+| `running` | Listening and collecting statistics |
+| `paused` | Process is running, but the event tap is disabled |
+| `permission_required` | Permission is missing, so listening cannot start |
+| `error` | Runtime error; requires `doctor` diagnostics |
 
 ## IPC
 
-首版使用 Unix domain socket。
+The first version uses a Unix domain socket.
 
-路径：
+Path:
 
 ```text
 ~/.keystats/daemon.sock
 ```
 
-`status` 可回退检查：
+`status` can fall back to checking:
 
-- LaunchAgent 状态
-- pid 文件
+- LaunchAgent status
+- pid file
 - `daemon.state.json`
-- 数据库最近写入时间
+- latest database write time
 
-## 文件布局
+## File Layout
 
 ```text
 ~/.keystats/
@@ -78,10 +78,10 @@ CLI daemon 使用当前用户级 `launchd` LaunchAgent 管理。
 └── daemon.state.json
 ```
 
-## 权限
+## Permissions
 
-- `start` 前 CLI 做 preflight
-- daemon 启动后必须再次检查权限
-- 运行中权限撤销时，daemon 停用 event tap 并进入 `permission_required`
-- `doctor` 负责输出用户可执行的修复步骤
+- The CLI runs a preflight check before `start`
+- The daemon must check permissions again after startup
+- If permission is revoked at runtime, the daemon disables the event tap and enters `permission_required`
+- `doctor` outputs actionable recovery steps for the user
 

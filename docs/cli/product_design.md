@@ -1,50 +1,50 @@
-# CLI 产品设计
+# CLI Product Design
 
-## 定位
+## Positioning
 
-Keystats CLI 是首发开源版本，面向开发者和终端用户，用于验证核心能力并建立社区使用基础。
+Keystats CLI is the first open-source release. It targets developers and terminal users, validates the core capabilities, and builds the initial community usage base.
 
-## 用户价值
+## User Value
 
-- 查看今日键盘使用量
-- 查看本周趋势
-- 查看按键类别分布
-- 查看应用维度统计
-- 查看按键排行
-- 以本地 daemon 方式长期记录
+- View today's keyboard usage
+- View weekly trends
+- View key category distribution
+- View app-level statistics
+- View key rankings
+- Record usage long term through a local daemon
 
-## 核心命令
+## Core Commands
 
-| 命令 | 用途 |
-|------|------|
-| `keystats start` | 启动后台统计 |
-| `keystats pause` | 暂停统计 |
-| `keystats resume` | 恢复统计 |
-| `keystats stop` | 停止后台统计 |
-| `keystats status` | 查看 daemon 状态 |
-| `keystats doctor` | 检查权限、数据库、LaunchAgent 状态 |
-| `keystats today` | 查看今日概览 |
-| `keystats week` | 查看本周趋势 |
-| `keystats stats --period 7d` | 查看详细统计 |
-| `keystats keys --period today` | 查看按键排行 |
-| `keystats mode` | 查看当前统计模式 |
-| `keystats mode detail` | 切换到按键明细模式 |
-| `keystats clear` | 清除本地统计数据 |
+| Command | Purpose |
+|---------|---------|
+| `keystats start` | Start background statistics collection |
+| `keystats pause` | Pause statistics collection |
+| `keystats resume` | Resume statistics collection |
+| `keystats stop` | Stop background statistics collection |
+| `keystats status` | Show daemon status |
+| `keystats doctor` | Check permissions, database, and LaunchAgent status |
+| `keystats today` | Show today's overview |
+| `keystats week` | Show weekly trends |
+| `keystats stats --period 7d` | Show detailed statistics |
+| `keystats keys --period today` | Show key rankings |
+| `keystats mode` | Show the current statistics mode |
+| `keystats mode detail` | Switch to key detail mode |
+| `keystats clear` | Clear local statistics data |
 
-## 首次使用流程
+## First-Run Flow
 
 ```bash
 brew install keystats
 keystats doctor
-# 按提示授予 Input Monitoring 权限
+# Grant Input Monitoring permission as instructed
 keystats start
 keystats today
 ```
 
-## 隐私交互
+## Privacy Interactions
 
-- 默认使用数字统计模式
-- 切换 detail 模式必须二次确认
-- `clear` 删除数据前必须二次确认
-- 权限不足时不展示误导性零数据，应展示权限状态
+- Use aggregate statistics mode by default
+- Require a second confirmation before switching to detail mode
+- Require a second confirmation before deleting data with `clear`
+- When permissions are missing, show permission status instead of misleading zero data
 

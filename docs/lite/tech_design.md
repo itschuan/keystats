@@ -1,6 +1,6 @@
-# Lite 技术方案
+# Lite Technical Design
 
-## 架构
+## Architecture
 
 ```text
 Keystats Lite
@@ -12,50 +12,50 @@ Keystats Lite
 └── KeystatsCore dependency
 ```
 
-## 技术选型
+## Technology Choices
 
 - SwiftUI
 - MenuBarExtra
 - SQLite via KeystatsCore
-- Input Monitoring 权限
-- `NSWorkspace` 前台应用识别
+- Input Monitoring permission
+- `NSWorkspace` foreground app detection
 
-## App Store 前置 Spike
+## App Store Preflight Spike
 
-Phase 2 开始前必须验证：
+Before Phase 2 starts, verify:
 
-- App Sandbox + `CGEventTap` 是否可运行
-- Input Monitoring 权限引导是否可接受
-- App Store 审核风险
-- SQLite 本地存储路径
-- 开机启动方案
+- Whether App Sandbox + `CGEventTap` can run
+- Whether the Input Monitoring permission guide is acceptable
+- App Store review risk
+- SQLite local storage path
+- Launch-at-login approach
 
-如果 Spike 失败，需要调整发布渠道或架构。
+If the spike fails, the release channel or architecture must be adjusted.
 
-## 权限处理
+## Permission Handling
 
-- 首次启动展示权限引导页
-- 提供跳转系统设置入口
-- 授权完成后回到 App 继续启动监听
-- 运行中权限撤销时显示权限失败状态
+- Show a permission guide on first launch
+- Provide an entry point to System Settings
+- After authorization, return to the app and continue listening
+- If permission is revoked at runtime, show a permission failure state
 
-## 数据访问
+## Data Access
 
-Lite 通过 KeystatsCore 查询：
+Lite queries through KeystatsCore:
 
-- 今日总按键
-- 今日活跃时间
-- 今日 Top Apps
-- 最近 7 天趋势
-- 当前统计模式
+- Today's total keys
+- Today's active time
+- Today's Top Apps
+- Last 7 days trend
+- Current statistics mode
 
-Lite 不直接操作 SQLite schema。
+Lite does not directly manipulate the SQLite schema.
 
-## 设置项
+## Settings
 
-- 统计模式
-- 开机自启
-- 清除本地数据
-- 数据保留说明
-- 隐私说明
+- Statistics mode
+- Launch at login
+- Clear local data
+- Data retention explanation
+- Privacy explanation
 

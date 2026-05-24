@@ -1,53 +1,53 @@
-# Core 产品设计
+# Core Product Design
 
-## 定位
+## Positioning
 
-Core 是 Keystats 的共享能力层，以 Swift Package 形式提供给 CLI 和 Lite 使用。它不直接面向终端用户，但决定产品的统计能力、隐私边界和数据可靠性。
+Core is Keystats' shared capability layer. It is provided as a Swift Package for both CLI and Lite. It is not directly exposed to end users, but it defines the product's statistics capabilities, privacy boundaries, and data reliability.
 
-## 核心目标
+## Core Goals
 
-- 监听 macOS 全局键盘事件
-- 默认只保存聚合统计，不保存可还原输入内容的按键序列
-- 支持按时间、应用、按键类别、具体按键统计
-- 为按键排行和未来键盘热力图提供数据基础
-- 所有数据本地存储，不上传服务器
+- Listen to global keyboard events on macOS
+- Store aggregate statistics by default, not key sequences that could reconstruct input content
+- Support statistics by time, app, key category, and individual key
+- Provide the data foundation for key rankings and future keyboard heatmaps
+- Store all data locally, with no server upload
 
-## 统计模式
+## Statistics Modes
 
-| 模式 | 默认状态 | 存储内容 | 适用场景 |
-|------|----------|----------|----------|
-| 数字统计模式 | 默认开启 | 按时间、应用、按键类别、具体按键聚合后的统计数字 | 日常使用，隐私风险最低 |
-| 按键明细模式 | 用户手动开启 | 单次按键事件明细，包括按键码、按键名称、修饰键和前台应用 | 深度分析、调试、个人研究 |
+| Mode | Default State | Stored Data | Use Case |
+|------|---------------|-------------|----------|
+| Aggregate statistics mode | Enabled by default | Aggregated counts by time, app, key category, and individual key | Daily use with the lowest privacy risk |
+| Key detail mode | Manually enabled by the user | Per-key event details, including key code, key name, modifiers, and foreground app | Deep analysis, debugging, personal research |
 
-## 隐私原则
+## Privacy Principles
 
-- 默认模式记录单个按键的聚合计数，不记录按键发生顺序
-- 默认模式不保存精确到单次事件的时间线
-- 按键明细模式必须由用户主动开启，并进行二次确认
-- 明细数据默认保留 7 天，可手动清除
-- 聚合数据默认保留 90 天
-- 数据只保存在本地
+- The default mode records aggregate counts for individual keys, but not key order
+- The default mode does not store a per-event timeline
+- Key detail mode must be explicitly enabled by the user and confirmed a second time
+- Detail data is retained for 7 days by default and can be manually cleared
+- Aggregate data is retained for 90 days by default
+- Data is stored locally only
 
-## App 维度统计
+## App-Level Statistics
 
-Core 需要记录前台应用维度：
+Core records foreground app context:
 
 - `app_bundle_id`
 - `app_name`
 
-无法识别前台应用时：
+When the foreground app cannot be identified:
 
 - `app_bundle_id = unknown`
 - `app_name = Unknown`
 
-## 按键排行与热力图
+## Key Rankings And Heatmaps
 
-默认数字统计模式下，Core 会保存按键级聚合数据，用于：
+In the default aggregate statistics mode, Core stores per-key aggregate data for:
 
-- 全局按键排行
-- 按应用筛选的按键排行
-- 按时间范围筛选的按键排行
-- 未来键盘热力图
+- Global key rankings
+- App-filtered key rankings
+- Time-range-filtered key rankings
+- Future keyboard heatmaps
 
-热力图以硬件 `key_code` 作为主键，`key_name` 只作为展示标签，避免输入法或键盘布局变化导致历史统计不可合并。
+Heatmaps use hardware `key_code` as the primary identity. `key_name` is only a display label, which prevents input method or keyboard layout changes from breaking historical aggregation.
 
