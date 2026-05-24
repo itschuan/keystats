@@ -10,13 +10,36 @@ The project currently has three planned modules:
 - `cli`: open-source command line product built on top of `core`
 - `lite`: standalone macOS menu bar app built on top of `core`
 
-The current repository is documentation-first. Implementation files have not been scaffolded yet.
+The repository now contains both planning documentation and an initial Swift implementation for Core and CLI.
 
 ## Current Structure
 
 ```text
 .
 ├── AGENTS.md
+├── Package.swift
+├── Sources/
+│   ├── CSQLite/
+│   │   └── module.modulemap
+│   ├── KeystatsCore/
+│   │   ├── Analyzer.swift
+│   │   ├── AppContextProvider.swift
+│   │   ├── DateUtils.swift
+│   │   ├── EventTapSupervisor.swift
+│   │   ├── KeyClassifier.swift
+│   │   ├── KeyListener.swift
+│   │   ├── KeyboardLayoutResolver.swift
+│   │   ├── Models.swift
+│   │   ├── Period.swift
+│   │   ├── PermissionChecker.swift
+│   │   ├── RetentionManager.swift
+│   │   ├── SQLiteDataStore.swift
+│   │   └── StatsAggregator.swift
+│   └── keystats/
+│       └── main.swift
+├── Tests/
+│   ├── KeystatsCLITests/
+│   └── KeystatsCoreTests/
 └── docs/
     ├── core/
     │   ├── product_design.md
@@ -137,4 +160,3 @@ Lite should depend on Core and should not duplicate Core storage or analytics lo
 - If a task changes data storage, update Core tech design, Core tasks, and Core tests.
 - If a task changes daemon lifecycle, update CLI tech design and CLI test tasks.
 - If a task changes App Store behavior, update Lite product design, Lite tech design, and Lite manual test tasks.
-
