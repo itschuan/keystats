@@ -325,12 +325,12 @@ struct TopKeysSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(Array(keys.enumerated()), id: \.element.keyCode) { index, key in
+                ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
                     HStack(spacing: 8) {
                         Text("\(index + 1)")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
-                            .frame(width: 18, alignment: .trailing)
+                            .frame(width: 16, alignment: .trailing)
                         Text(key.keyName)
                             .lineLimit(1)
                         Spacer()

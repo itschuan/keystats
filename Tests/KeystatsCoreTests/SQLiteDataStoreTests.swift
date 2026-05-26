@@ -100,6 +100,25 @@ final class SQLiteDataStoreTests: XCTestCase {
         XCTAssertEqual(apps.map(\.totalKeys), [2, 1])
     }
 
+    func testTopKeysAggregatesAcrossAppsByDefault() throws {
+        let store = try makeTemporaryStore()
+        defer { store.close() }
+        let aggregator = StatsAggregator()
+        let browser = AppContext(bundleID: "com.example.Browser", name: "Browser")
+
+        aggregator.record(makeEvent(keyCode: 49, keyName: "Space", category: .symbol, app: browser))
+        aggregator.record(makeEvent(keyCode: 49, keyName: "Space", category: .symbol, app: testApp))
+        aggregator.record(makeEvent(keyCode: 51, keyName: "Delete", category: .function, app: browser))
+        let snapshot = aggregator.drain()
+        try store.upsertKeyUsage(snapshot.keyUsageBuckets)
+
+        let keys = try store.topKeys(period: .today(fixedDate()), limit: 10)
+
+        XCTAssertEqual(keys.map(\.keyName), ["Space", "Delete"])
+        XCTAssertEqual(keys.map(\.count), [2, 1])
+        XCTAssertEqual(keys.first?.appName, "All Apps")
+    }
+
     func testDailyUsageFillsMissingDays() throws {
         let store = try makeTemporaryStore()
         defer { store.close() }

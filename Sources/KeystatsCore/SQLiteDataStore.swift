@@ -320,12 +320,14 @@ public final class SQLiteDataStore {
         }
 
         values.append(.int(limit))
+        let selectApp = appBundleID == nil ? "'all' AS app_bundle_id, 'All Apps' AS app_name" : "app_bundle_id, app_name"
+        let groupByApp = appBundleID == nil ? "" : ", app_bundle_id, app_name"
         let rows = try query(
             """
-            SELECT key_code, key_name, key_category, app_bundle_id, app_name, SUM(count) AS total
+            SELECT key_code, key_name, key_category, \(selectApp), SUM(count) AS total
             FROM key_usage_stats
             WHERE \(clauses.joined(separator: " AND "))
-            GROUP BY key_code, key_name, key_category, app_bundle_id, app_name
+            GROUP BY key_code, key_name, key_category\(groupByApp)
             ORDER BY total DESC
             LIMIT ?;
             """,
