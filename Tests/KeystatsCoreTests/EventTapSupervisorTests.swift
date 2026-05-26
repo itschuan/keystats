@@ -24,5 +24,8 @@ private struct StubPermissionChecker: PermissionChecking {
     func status() -> PermissionStatus {
         PermissionStatus(inputMonitoringGranted: granted, accessibilityGranted: granted)
     }
-}
 
+    func requestInputMonitoringAccess() -> Bool {
+        granted
+    }
+}

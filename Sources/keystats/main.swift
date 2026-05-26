@@ -1,15 +1,85 @@
 import Foundation
 import KeystatsCore
+#if os(macOS)
+import AppKit
+#endif
+#if os(macOS)
+import Darwin
+#endif
+
+enum CLIError: Error, CustomStringConvertible {
+    case commandFailed(String)
+
+    var description: String {
+        switch self {
+        case .commandFailed(let message): return message
+        }
+    }
+}
 
 @main
 struct KeystatsCLI {
     static func main() {
         do {
-            try CommandRouter(arguments: Array(CommandLine.arguments.dropFirst())).run()
+            let arguments = Array(CommandLine.arguments.dropFirst())
+            if arguments.isEmpty && Bundle.main.bundlePath.hasSuffix(".app") {
+                try AppLaunchCommand(environment: .default).run()
+            } else {
+                try CommandRouter(arguments: arguments).run()
+            }
         } catch {
             fputs("Error: \(error)\n", stderr)
+            #if os(macOS)
+            if Bundle.main.bundlePath.hasSuffix(".app") {
+                AppLaunchCommand.showAlert(title: "Keystats Error", message: "\(error)")
+            }
+            #endif
             Foundation.exit(1)
         }
+    }
+}
+
+struct AppLaunchCommand {
+    let environment: CLIEnvironment
+
+    func run() throws {
+        #if os(macOS)
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        #endif
+
+        var permission = PermissionChecker().status()
+        if !permission.inputMonitoringGranted {
+            _ = PermissionChecker().requestInputMonitoringAccess()
+            permission = PermissionChecker().status()
+        }
+
+        guard permission.inputMonitoringGranted else {
+            Self.showAlert(
+                title: "Input Monitoring Required",
+                message: "Open System Settings > Privacy & Security > Input Monitoring, click +, add Keystats.app, then open Keystats again."
+            )
+            return
+        }
+
+        let manager = LaunchAgentManager(environment: environment)
+        try manager.install()
+        try manager.load()
+        let config = CLIConfig.load(from: environment.configURL)
+        try DaemonState(status: .running, mode: config.mode, updatedAt: Date()).save(to: environment.stateURL)
+        Self.showAlert(title: "Keystats Started", message: "Keystats is now running in the background.")
+    }
+
+    static func showAlert(title: String, message: String) {
+        #if os(macOS)
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+        #else
+        print("\(title): \(message)")
+        #endif
     }
 }
 
@@ -141,17 +211,26 @@ struct DaemonState: Codable {
 
 struct LaunchAgentManager {
     let environment: CLIEnvironment
+    private let label = "com.keystats.daemon"
+
+    var launchDomain: String {
+        #if os(macOS)
+        return "gui/\(getuid())"
+        #else
+        return "gui/0"
+        #endif
+    }
 
     func install() throws {
         try environment.prepare()
-        let executable = CommandLine.arguments[0]
+        let executable = absoluteExecutablePath()
         let plist = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
         <dict>
           <key>Label</key>
-          <string>com.keystats.daemon</string>
+          <string>\(label)</string>
           <key>ProgramArguments</key>
           <array>
             <string>\(executable)</string>
@@ -172,9 +251,43 @@ struct LaunchAgentManager {
         try plist.write(to: environment.launchAgentURL, atomically: true, encoding: .utf8)
     }
 
+    func load() throws {
+        try? runLaunchctl(["bootout", launchDomain, environment.launchAgentURL.path], allowFailure: true)
+        try runLaunchctl(["bootstrap", launchDomain, environment.launchAgentURL.path])
+        try runLaunchctl(["enable", "\(launchDomain)/\(label)"], allowFailure: true)
+        try runLaunchctl(["kickstart", "-k", "\(launchDomain)/\(label)"], allowFailure: true)
+    }
+
+    func unload() throws {
+        try runLaunchctl(["bootout", launchDomain, environment.launchAgentURL.path], allowFailure: true)
+    }
+
     func uninstall() throws {
         if FileManager.default.fileExists(atPath: environment.launchAgentURL.path) {
             try FileManager.default.removeItem(at: environment.launchAgentURL)
+        }
+    }
+
+    private func absoluteExecutablePath() -> String {
+        let executable = CommandLine.arguments[0]
+        if executable.hasPrefix("/") {
+            return executable
+        }
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(executable)
+            .standardizedFileURL
+            .path
+    }
+
+    private func runLaunchctl(_ arguments: [String], allowFailure: Bool = false) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = arguments
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus != 0 && !allowFailure {
+            throw CLIError.commandFailed("launchctl \(arguments.joined(separator: " ")) failed")
         }
     }
 }
@@ -183,14 +296,27 @@ struct StartCommand {
     let environment: CLIEnvironment
 
     func run() throws {
-        let permission = PermissionChecker().status()
-        guard permission.inputMonitoringGranted else {
+        let supervisor = EventTapSupervisor()
+        var permission = PermissionChecker().status()
+        if !permission.inputMonitoringGranted {
             print("Input Monitoring: Not Granted")
-            print("Open System Settings > Privacy & Security > Input Monitoring, then enable keystats.")
-            return
+            print("Requesting Input Monitoring permission...")
+            _ = supervisor.requestPermission()
+            permission = PermissionChecker().status()
+            guard permission.inputMonitoringGranted else {
+                try environment.prepare()
+                let config = CLIConfig.load(from: environment.configURL)
+                try DaemonState(status: .permissionRequired, mode: config.mode, updatedAt: Date()).save(to: environment.stateURL)
+                print("Open System Settings > Privacy & Security > Input Monitoring, then enable keystats.")
+                print("If no prompt appears or keystats is not listed, click + and add Keystats.app or the terminal app that launched it.")
+                print("After granting access, run `keystats start` again.")
+                return
+            }
         }
 
-        try LaunchAgentManager(environment: environment).install()
+        let manager = LaunchAgentManager(environment: environment)
+        try manager.install()
+        try manager.load()
         let config = CLIConfig.load(from: environment.configURL)
         try DaemonState(status: .running, mode: config.mode, updatedAt: Date()).save(to: environment.stateURL)
         print("Keystats daemon started.")
@@ -202,7 +328,9 @@ struct StopCommand {
     let environment: CLIEnvironment
 
     func run() throws {
-        try LaunchAgentManager(environment: environment).uninstall()
+        let manager = LaunchAgentManager(environment: environment)
+        try manager.unload()
+        try manager.uninstall()
         let config = CLIConfig.load(from: environment.configURL)
         try environment.prepare()
         try DaemonState(status: .stopped, mode: config.mode, updatedAt: Date()).save(to: environment.stateURL)
@@ -249,7 +377,12 @@ struct DoctorCommand {
         print("Database: \(FileManager.default.fileExists(atPath: environment.databaseURL.path) ? environment.databaseURL.path : "Not initialized")")
         print("LaunchAgent: \(FileManager.default.fileExists(atPath: environment.launchAgentURL.path) ? "Installed" : "Not Installed")")
         if !status.inputMonitoringGranted {
+            if CommandLine.arguments.contains("--request-permission") {
+                print("Requesting Input Monitoring permission...")
+                _ = PermissionChecker().requestInputMonitoringAccess()
+            }
             print("Open System Settings > Privacy & Security > Input Monitoring, then enable keystats.")
+            print("If no prompt appears or keystats is not listed, click + and add Keystats.app or the terminal app that launched it.")
         }
     }
 }
@@ -380,10 +513,64 @@ struct DaemonCommand {
             return
         }
         try environment.prepare()
-        let config = CLIConfig.load(from: environment.configURL)
-        let permission = PermissionChecker().status()
-        let status: DaemonStatus = permission.inputMonitoringGranted ? .running : .permissionRequired
-        try DaemonState(status: status, mode: config.mode, updatedAt: Date()).save(to: environment.stateURL)
+        let store = try environment.dataStore()
+        let supervisor = EventTapSupervisor()
+        var config = CLIConfig.load(from: environment.configURL)
+        let aggregator = StatsAggregator(mode: config.mode)
+
+        func saveState(_ status: DaemonStatus) {
+            try? DaemonState(status: status, mode: config.mode, updatedAt: Date()).save(to: environment.stateURL)
+        }
+
+        func flush() {
+            let snapshot = aggregator.drain()
+            do {
+                try store.upsertMinuteStats(snapshot.minuteBuckets)
+                try store.upsertKeyUsage(snapshot.keyUsageBuckets)
+                try store.insertKeyEvents(snapshot.detailEvents)
+            } catch {
+                fputs("Flush failed: \(error)\n", stderr)
+                saveState(.error)
+            }
+        }
+
+        let status = supervisor.start { event in
+            aggregator.record(event)
+        }
+        saveState(status)
+        guard status == .running else {
+            store.close()
+            return
+        }
+
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            let latestConfig = CLIConfig.load(from: environment.configURL)
+            if latestConfig.mode != config.mode {
+                config = latestConfig
+                aggregator.setMode(config.mode)
+            }
+
+            let desiredState = DaemonState.load(from: environment.stateURL)
+            switch desiredState?.status {
+            case .paused:
+                supervisor.pause()
+                flush()
+            case .stopped:
+                flush()
+                supervisor.stop()
+                store.close()
+                Foundation.exit(0)
+            default:
+                if !PermissionChecker().status().inputMonitoringGranted {
+                    supervisor.pause()
+                    saveState(.permissionRequired)
+                } else if supervisor.status == .paused || supervisor.status == .permissionRequired {
+                    saveState(supervisor.resume())
+                }
+                flush()
+            }
+        }
+
         RunLoop.current.run()
     }
 }
@@ -426,4 +613,3 @@ struct Options {
         args.contains(key)
     }
 }
-

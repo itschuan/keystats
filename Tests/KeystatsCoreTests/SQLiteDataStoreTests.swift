@@ -82,6 +82,41 @@ final class SQLiteDataStoreTests: XCTestCase {
         XCTAssertEqual(keys.count, 2)
     }
 
+    func testTopAppsReturnsAppsForToday() throws {
+        let store = try makeTemporaryStore()
+        defer { store.close() }
+        let aggregator = StatsAggregator()
+        let browser = AppContext(bundleID: "com.example.Browser", name: "Browser")
+
+        aggregator.record(makeEvent(app: browser))
+        aggregator.record(makeEvent(app: browser))
+        aggregator.record(makeEvent(app: testApp))
+        let snapshot = aggregator.drain()
+        try store.upsertMinuteStats(snapshot.minuteBuckets)
+
+        let apps = try store.topApps(on: fixedDate(), limit: 2)
+
+        XCTAssertEqual(apps.map(\.name), ["Browser", "Editor"])
+        XCTAssertEqual(apps.map(\.totalKeys), [2, 1])
+    }
+
+    func testDailyUsageFillsMissingDays() throws {
+        let store = try makeTemporaryStore()
+        defer { store.close() }
+        let aggregator = StatsAggregator()
+
+        aggregator.record(makeEvent(date: fixedDate("2026-05-24T10:00:00.000Z")))
+        aggregator.record(makeEvent(date: fixedDate("2026-05-25T10:00:00.000Z")))
+        aggregator.record(makeEvent(date: fixedDate("2026-05-25T11:00:00.000Z")))
+        let snapshot = aggregator.drain()
+        try store.upsertMinuteStats(snapshot.minuteBuckets)
+
+        let days = try store.dailyUsage(days: 3, endingOn: fixedDate())
+
+        XCTAssertEqual(days.map(\.date), ["2026-05-23", "2026-05-24", "2026-05-25"])
+        XCTAssertEqual(days.map(\.totalKeys), [0, 1, 2])
+    }
+
     func testRetentionDeletesOldDetailEvents() throws {
         let store = try makeTemporaryStore()
         defer { store.close() }
@@ -96,4 +131,3 @@ final class SQLiteDataStoreTests: XCTestCase {
         XCTAssertEqual(rows.first?["total"]?.intValue, 1)
     }
 }
-

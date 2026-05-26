@@ -344,6 +344,62 @@ public final class SQLiteDataStore {
         }
     }
 
+    public func topApps(on date: Date = Date(), limit: Int = 3) throws -> [AppUsage] {
+        let day = DateUtils.dayString(date)
+        let start = "\(day)T00:00:00.000Z"
+        let endDate = DateUtils.calendar.date(byAdding: .day, value: 1, to: DateUtils.calendar.startOfDay(for: date)) ?? date
+        let end = DateUtils.isoString(endDate)
+
+        let rows = try query(
+            """
+            SELECT app_bundle_id, app_name, SUM(total_keys) AS total
+            FROM minute_stats
+            WHERE minute >= ? AND minute < ?
+            GROUP BY app_bundle_id, app_name
+            ORDER BY total DESC
+            LIMIT ?;
+            """,
+            [.text(start), .text(end), .int(limit)]
+        )
+
+        return rows.map { row in
+            AppUsage(
+                bundleID: row["app_bundle_id"]?.textValue ?? "unknown",
+                name: row["app_name"]?.textValue ?? "Unknown",
+                totalKeys: row["total"]?.intValue ?? 0
+            )
+        }
+    }
+
+    public func dailyUsage(days: Int = 7, endingOn date: Date = Date()) throws -> [DailyUsage] {
+        let dayCount = max(days, 1)
+        let calendar = DateUtils.calendar
+        let endDay = calendar.startOfDay(for: date)
+        let startDay = calendar.date(byAdding: .day, value: -(dayCount - 1), to: endDay) ?? endDay
+        let start = DateUtils.isoString(startDay)
+        let end = DateUtils.isoString(calendar.date(byAdding: .day, value: 1, to: endDay) ?? date)
+
+        let rows = try query(
+            """
+            SELECT substr(minute, 1, 10) AS day, SUM(total_keys) AS total
+            FROM minute_stats
+            WHERE minute >= ? AND minute < ?
+            GROUP BY day;
+            """,
+            [.text(start), .text(end)]
+        )
+
+        let totalsByDay = Dictionary(uniqueKeysWithValues: rows.map {
+            ($0["day"]?.textValue ?? "", $0["total"]?.intValue ?? 0)
+        })
+
+        return (0..<dayCount).map { offset in
+            let current = calendar.date(byAdding: .day, value: offset, to: startDay) ?? startDay
+            let day = DateUtils.dayString(current)
+            return DailyUsage(date: day, totalKeys: totalsByDay[day] ?? 0)
+        }
+    }
+
     public static let schema = """
     CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,

@@ -9,22 +9,21 @@ let package = Package(
     ],
     products: [
         .library(name: "KeystatsCore", targets: ["KeystatsCore"]),
-        .executable(name: "keystats", targets: ["keystats"])
+        .executable(name: "keystats", targets: ["keystats"]),
+        .executable(name: "KeystatsLite", targets: ["KeystatsLite"])
     ],
     targets: [
-        .systemLibrary(
-            name: "CSQLite",
-            pkgConfig: "sqlite3",
-            providers: [
-                .brew(["sqlite3"])
-            ]
-        ),
+        .systemLibrary(name: "CSQLite"),
         .target(
             name: "KeystatsCore",
             dependencies: ["CSQLite"]
         ),
         .executableTarget(
             name: "keystats",
+            dependencies: ["KeystatsCore"]
+        ),
+        .executableTarget(
+            name: "KeystatsLite",
             dependencies: ["KeystatsCore"]
         ),
         .testTarget(
@@ -37,4 +36,3 @@ let package = Package(
         )
     ]
 )
-

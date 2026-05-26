@@ -107,3 +107,24 @@ public struct KeyUsage: Codable, Equatable {
     }
 }
 
+public struct AppUsage: Codable, Equatable {
+    public let bundleID: String
+    public let name: String
+    public let totalKeys: Int
+
+    public init(bundleID: String, name: String, totalKeys: Int) {
+        self.bundleID = bundleID
+        self.name = name
+        self.totalKeys = totalKeys
+    }
+}
+
+public struct DailyUsage: Codable, Equatable {
+    public let date: String
+    public let totalKeys: Int
+
+    public init(date: String, totalKeys: Int) {
+        self.date = date
+        self.totalKeys = totalKeys
+    }
+}

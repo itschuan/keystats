@@ -14,6 +14,7 @@ public struct PermissionStatus: Equatable {
 
 public protocol PermissionChecking {
     func status() -> PermissionStatus
+    func requestInputMonitoringAccess() -> Bool
 }
 
 public struct PermissionChecker: PermissionChecking {
@@ -29,6 +30,14 @@ public struct PermissionChecker: PermissionChecking {
         )
         #else
         return PermissionStatus(inputMonitoringGranted: false, accessibilityGranted: false)
+        #endif
+    }
+
+    public func requestInputMonitoringAccess() -> Bool {
+        #if os(macOS)
+        return CGRequestListenEventAccess()
+        #else
+        return false
         #endif
     }
 }
