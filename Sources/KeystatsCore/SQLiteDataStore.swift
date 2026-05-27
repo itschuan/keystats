@@ -241,8 +241,8 @@ public final class SQLiteDataStore {
     }
 
     public func todayStats(on date: Date = Date()) throws -> TodayStats {
-        let day = DateUtils.dayString(date)
-        let start = "\(day)T00:00:00.000Z"
+        let startDate = DateUtils.calendar.startOfDay(for: date)
+        let start = DateUtils.isoString(startDate)
         let endDate = DateUtils.calendar.date(byAdding: .day, value: 1, to: DateUtils.calendar.startOfDay(for: date)) ?? date
         let end = DateUtils.isoString(endDate)
 
@@ -347,8 +347,8 @@ public final class SQLiteDataStore {
     }
 
     public func topApps(on date: Date = Date(), limit: Int = 3) throws -> [AppUsage] {
-        let day = DateUtils.dayString(date)
-        let start = "\(day)T00:00:00.000Z"
+        let startDate = DateUtils.calendar.startOfDay(for: date)
+        let start = DateUtils.isoString(startDate)
         let endDate = DateUtils.calendar.date(byAdding: .day, value: 1, to: DateUtils.calendar.startOfDay(for: date)) ?? date
         let end = DateUtils.isoString(endDate)
 
@@ -378,27 +378,20 @@ public final class SQLiteDataStore {
         let calendar = DateUtils.calendar
         let endDay = calendar.startOfDay(for: date)
         let startDay = calendar.date(byAdding: .day, value: -(dayCount - 1), to: endDay) ?? endDay
-        let start = DateUtils.isoString(startDay)
-        let end = DateUtils.isoString(calendar.date(byAdding: .day, value: 1, to: endDay) ?? date)
 
-        let rows = try query(
-            """
-            SELECT substr(minute, 1, 10) AS day, SUM(total_keys) AS total
-            FROM minute_stats
-            WHERE minute >= ? AND minute < ?
-            GROUP BY day;
-            """,
-            [.text(start), .text(end)]
-        )
-
-        let totalsByDay = Dictionary(uniqueKeysWithValues: rows.map {
-            ($0["day"]?.textValue ?? "", $0["total"]?.intValue ?? 0)
-        })
-
-        return (0..<dayCount).map { offset in
+        return try (0..<dayCount).map { offset in
             let current = calendar.date(byAdding: .day, value: offset, to: startDay) ?? startDay
             let day = DateUtils.dayString(current)
-            return DailyUsage(date: day, totalKeys: totalsByDay[day] ?? 0)
+            let nextDay = calendar.date(byAdding: .day, value: 1, to: current) ?? current
+            let rows = try query(
+                """
+                SELECT COALESCE(SUM(total_keys), 0) AS total
+                FROM minute_stats
+                WHERE minute >= ? AND minute < ?;
+                """,
+                [.text(DateUtils.isoString(current)), .text(DateUtils.isoString(nextDay))]
+            )
+            return DailyUsage(date: day, totalKeys: rows.first?["total"]?.intValue ?? 0)
         }
     }
 

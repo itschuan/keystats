@@ -46,6 +46,7 @@ final class LiteModel: ObservableObject {
     @Published private var pendingKeyCount = 0
 
     private let environment = LiteEnvironment.default
+    private lazy var logger = LiteLogger(logURL: environment.logURL)
     private let permissionChecker = PermissionChecker()
     private let supervisor = EventTapSupervisor()
     private let aggregator = StatsAggregator()
@@ -68,19 +69,23 @@ final class LiteModel: ObservableObject {
     func configure() {
         do {
             try environment.prepare()
+            logger.log("configure appVersion=0.1.0 database=\(environment.databaseURL.path)")
             store = try SQLiteDataStore(path: environment.databaseURL.path)
             mode = LiteConfig.load(from: environment.configURL).mode
             aggregator.setMode(mode)
+            logger.log("store opened mode=\(mode.rawValue)")
             refresh()
             startTimers()
             startListeningIfAllowed()
         } catch {
             lastError = "\(error)"
+            logger.log("configure failed error=\(error)")
         }
     }
 
     func requestPermission() {
         NSApplication.shared.activate(ignoringOtherApps: true)
+        logger.log("request input monitoring access")
         _ = permissionChecker.requestInputMonitoringAccess()
         startListeningIfAllowed()
         refresh()
@@ -93,6 +98,7 @@ final class LiteModel: ObservableObject {
     }
 
     func retryPermissionCheck() {
+        logger.log("retry permission check preflight=\(permissionChecker.status().inputMonitoringGranted)")
         startListeningIfAllowed()
         refresh()
     }
@@ -108,6 +114,7 @@ final class LiteModel: ObservableObject {
             aggregator.setMode(mode)
         } catch {
             lastError = "\(error)"
+            logger.log("refresh failed error=\(error)")
         }
     }
 
@@ -116,26 +123,37 @@ final class LiteModel: ObservableObject {
         aggregator.setMode(newMode)
         do {
             try LiteConfig(mode: newMode).save(to: environment.configURL)
+            logger.log("mode changed mode=\(newMode.rawValue)")
         } catch {
             lastError = "\(error)"
+            logger.log("mode save failed error=\(error)")
         }
     }
 
     func clearData() {
         do {
+            logger.log("clear data requested liveTotal=\(liveTotalKeys) pending=\(pendingKeyCount)")
             _ = aggregator.drain()
             pendingKeyCount = 0
             try store?.clearAllData()
             refresh()
+            logger.log("clear data completed today=\(today.totalKeys)")
             statusMessage = "Data cleared."
         } catch {
             lastError = "\(error)"
+            logger.log("clear data failed error=\(error)")
         }
     }
 
     func quit() {
+        logger.log("quit requested liveTotal=\(liveTotalKeys) pending=\(pendingKeyCount)")
         flush()
         NSApplication.shared.terminate(nil)
+    }
+
+    func revealLog() {
+        logger.log("reveal log requested")
+        NSWorkspace.shared.activateFileViewerSelecting([environment.logURL])
     }
 
     private func startListeningIfAllowed() {
@@ -145,6 +163,7 @@ final class LiteModel: ObservableObject {
             }
         }
         permissionGranted = status == .running
+        logger.log("listener start status=\(status.rawValue) preflight=\(permissionChecker.status().inputMonitoringGranted)")
         if status == .error {
             lastError = "Keyboard listener could not start."
         }
@@ -153,6 +172,7 @@ final class LiteModel: ObservableObject {
     private func startTimers() {
         refreshTimer?.invalidate()
         flushTimer?.invalidate()
+        logger.log("start timers refresh=2s flush=5s")
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
@@ -169,6 +189,7 @@ final class LiteModel: ObservableObject {
     private func flush() {
         let snapshot = aggregator.drain()
         do {
+            let eventCount = snapshot.minuteBuckets.reduce(0) { $0 + $1.totalKeys }
             try store?.upsertMinuteStats(snapshot.minuteBuckets)
             try store?.upsertKeyUsage(snapshot.keyUsageBuckets)
             try store?.insertKeyEvents(snapshot.detailEvents)
@@ -177,8 +198,12 @@ final class LiteModel: ObservableObject {
             topApps = try store?.topApps(limit: 3) ?? []
             topKeys = try store?.topKeys(period: .today(), limit: 10) ?? []
             dailyUsage = try store?.dailyUsage(days: 7) ?? []
+            if eventCount > 0 {
+                logger.log("flush events=\(eventCount) minuteBuckets=\(snapshot.minuteBuckets.count) keyBuckets=\(snapshot.keyUsageBuckets.count) detailEvents=\(snapshot.detailEvents.count) today=\(today.totalKeys)")
+            }
         } catch {
             lastError = "\(error)"
+            logger.log("flush failed error=\(error)")
         }
     }
 
@@ -186,6 +211,9 @@ final class LiteModel: ObservableObject {
         aggregator.record(event)
         pendingKeyCount += 1
         statusMessage = nil
+        if pendingKeyCount == 1 || pendingKeyCount.isMultiple(of: 100) {
+            logger.log("record pending=\(pendingKeyCount) liveTotal=\(liveTotalKeys)")
+        }
     }
 
     private func compact(_ value: Int) -> String {
@@ -363,6 +391,9 @@ struct SettingsSection: View {
                 Button("Clear Data", role: .destructive) {
                     model.clearData()
                 }
+                Button("Reveal Log") {
+                    model.revealLog()
+                }
                 Spacer()
                 Button("Quit") {
                     model.quit()
@@ -439,9 +470,62 @@ struct LiteEnvironment {
         keystatsDirectory.appendingPathComponent("lite.config.json")
     }
 
+    var logURL: URL {
+        keystatsDirectory.appendingPathComponent("keystats-lite.log")
+    }
+
     func prepare() throws {
         try FileManager.default.createDirectory(at: keystatsDirectory, withIntermediateDirectories: true)
     }
+}
+
+final class LiteLogger {
+    private let logURL: URL
+    private let queue = DispatchQueue(label: "dev.keystats.lite.logger")
+    private let formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    init(logURL: URL) {
+        self.logURL = logURL
+    }
+
+    func log(_ message: String) {
+        let line = "\(formatter.string(from: Date())) \(message)\n"
+        queue.async { [logURL] in
+            do {
+                let parent = logURL.deletingLastPathComponent()
+                try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+                rotateIfNeeded(logURL)
+                if FileManager.default.fileExists(atPath: logURL.path) {
+                    let handle = try FileHandle(forWritingTo: logURL)
+                    try handle.seekToEnd()
+                    if let data = line.data(using: .utf8) {
+                        try handle.write(contentsOf: data)
+                    }
+                    try handle.close()
+                } else {
+                    try line.write(to: logURL, atomically: true, encoding: .utf8)
+                }
+            } catch {
+                NSLog("Keystats Lite log failed: \(error)")
+            }
+        }
+    }
+}
+
+private func rotateIfNeeded(_ logURL: URL) {
+    guard let attributes = try? FileManager.default.attributesOfItem(atPath: logURL.path),
+          let size = attributes[.size] as? NSNumber,
+          size.intValue > 1_000_000 else {
+        return
+    }
+
+    let rotated = logURL.deletingPathExtension().appendingPathExtension("old.log")
+    try? FileManager.default.removeItem(at: rotated)
+    try? FileManager.default.moveItem(at: logURL, to: rotated)
 }
 
 struct LiteConfig: Codable {
