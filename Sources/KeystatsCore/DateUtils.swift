@@ -1,7 +1,12 @@
 import Foundation
 
 enum DateUtils {
-    static let calendar = Calendar(identifier: .gregorian)
+    static var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Calendar.current.locale
+        calendar.timeZone = Calendar.current.timeZone
+        return calendar
+    }
 
     static func minuteBucket(_ date: Date) -> Date {
         let comps = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
@@ -36,4 +41,3 @@ extension ISO8601DateFormatter {
         return formatter
     }()
 }
-

@@ -2,7 +2,7 @@
 
 ## Positioning
 
-Core is Keystats' shared capability layer. It is provided as a Swift Package for both CLI and Lite. It is not directly exposed to end users, but it defines the product's statistics capabilities, privacy boundaries, and data reliability.
+Core is Keystats' shared capability layer. It is provided as a Swift Package for Keystats Lite. It is not directly exposed to end users, but it defines the product's statistics capabilities, privacy boundaries, and data reliability.
 
 ## Core Goals
 
@@ -50,4 +50,3 @@ In the default aggregate statistics mode, Core stores per-key aggregate data for
 - Future keyboard heatmaps
 
 Heatmaps use hardware `key_code` as the primary identity. `key_name` is only a display label, which prevents input method or keyboard layout changes from breaking historical aggregation.
-

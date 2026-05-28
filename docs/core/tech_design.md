@@ -42,7 +42,7 @@ Global keyboard listening through `CGEventTap` requires Input Monitoring permiss
 Core requirements:
 
 - Check permissions before starting listening
-- Check permissions again after the daemon starts
+- Check permissions again after the app starts listening
 - Disable the event tap if permissions are revoked at runtime
 - Enter the `permission_required` state when listening is not allowed
 
@@ -136,11 +136,11 @@ PRAGMA foreign_keys = ON;
 
 Write strategy:
 
-- The daemon is the only writer
+- The Lite app process is the only writer
 - A single-writer queue serializes all writes
 - `minute_stats` and `key_usage_stats` use `INSERT ... ON CONFLICT ... DO UPDATE`
 - Flush operations run inside transactions
-- CLI and Lite use read-only connections for queries
+- Read paths should avoid schema mutation and should share Core query primitives
 
 ## Aggregation Strategy
 
@@ -148,5 +148,4 @@ Write strategy:
 - Data is flushed to SQLite every minute by default
 - `minute_stats` and `key_usage_stats` are aggregate fact tables
 - `daily_stats` is a query cache and can be rebuilt from aggregate fact tables
-- On startup, the daemon backfills missing `daily_stats` records for the last 7 days
-
+- On startup, Lite can rebuild query caches from aggregate facts when needed

@@ -14,7 +14,7 @@ public enum StatsMode: String, Codable, Equatable {
     case detail
 }
 
-public enum DaemonStatus: String, Codable, Equatable {
+public enum ListenerStatus: String, Codable, Equatable {
     case stopped
     case running
     case paused

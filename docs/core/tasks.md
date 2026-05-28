@@ -3,7 +3,7 @@
 ## P0
 
 - Initialize the Swift Package structure
-- Define Core models: key event, key category, app context, stat bucket, daemon status
+- Define Core models: key event, key category, app context, stat bucket, listener status
 - Implement `MigrationRunner`
 - Implement `DataStore` initialization, migration, and connection management
 - Configure SQLite WAL / busy timeout / foreign keys
@@ -32,4 +32,3 @@
 - Support custom data retention periods
 - Support excluded apps
 - Support more keyboard layout display labels
-

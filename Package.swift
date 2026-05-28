@@ -9,18 +9,16 @@ let package = Package(
     ],
     products: [
         .library(name: "KeystatsCore", targets: ["KeystatsCore"]),
-        .executable(name: "keystats", targets: ["keystats"]),
         .executable(name: "KeystatsLite", targets: ["KeystatsLite"])
     ],
     targets: [
         .systemLibrary(name: "CSQLite"),
         .target(
             name: "KeystatsCore",
-            dependencies: ["CSQLite"]
-        ),
-        .executableTarget(
-            name: "keystats",
-            dependencies: ["KeystatsCore"]
+            dependencies: ["CSQLite"],
+            linkerSettings: [
+                .linkedFramework("IOKit")
+            ]
         ),
         .executableTarget(
             name: "KeystatsLite",
@@ -28,10 +26,6 @@ let package = Package(
         ),
         .testTarget(
             name: "KeystatsCoreTests",
-            dependencies: ["KeystatsCore"]
-        ),
-        .testTarget(
-            name: "KeystatsCLITests",
             dependencies: ["KeystatsCore"]
         )
     ]

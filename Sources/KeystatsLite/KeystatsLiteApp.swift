@@ -36,6 +36,8 @@ struct MenuBarCounterLabel: View {
 @MainActor
 final class LiteModel: ObservableObject {
     @Published var permissionGranted = false
+    @Published var inputMonitoringGranted = false
+    @Published var accessibilityGranted = false
     @Published var mode: StatsMode = .aggregate
     @Published var today = TodayStats(totalKeys: 0, activeMinutes: 0, peakHour: nil, topAppName: nil, keyDistribution: [:])
     @Published var topApps: [AppUsage] = []
@@ -43,6 +45,14 @@ final class LiteModel: ObservableObject {
     @Published var dailyUsage: [DailyUsage] = []
     @Published var lastError: String?
     @Published var statusMessage: String?
+    @Published var listenerStatus: String = "stopped"
+    @Published var lastEventAt: Date?
+    @Published var lastFlushAt: Date?
+    @Published var lastFlushEvents = 0
+    @Published var lastRestartAt: Date?
+    @Published var restartCount = 0
+    @Published var eventTapDiagnostics = EventTapDiagnostics.empty
+    @Published var secureInputStatus = SecureInputStatus.unavailable
     @Published private var pendingKeyCount = 0
 
     private let environment = LiteEnvironment.default
@@ -53,13 +63,57 @@ final class LiteModel: ObservableObject {
     private var store: SQLiteDataStore?
     private var refreshTimer: Timer?
     private var flushTimer: Timer?
+    private var lastLoggedSecureInputDescription = ""
 
     var menuTitle: String {
-        permissionGranted ? compact(liveTotalKeys) : "Setup"
+        inputMonitoringGranted || accessibilityGranted ? compact(liveTotalKeys) : "Setup"
     }
 
     var liveTotalKeys: Int {
         today.totalKeys + pendingKeyCount
+    }
+
+    var databasePath: String {
+        environment.databaseURL.path
+    }
+
+    var logPath: String {
+        environment.logURL.path
+    }
+
+    var canTrackInBackground: Bool {
+        inputMonitoringGranted
+    }
+
+    var secureInputDescription: String {
+        guard secureInputStatus.isAvailable else { return "unknown" }
+        guard secureInputStatus.isEnabled else { return "off" }
+        guard let pid = secureInputStatus.pid else { return "on" }
+        if let app = NSRunningApplication(processIdentifier: pid_t(pid)),
+           let name = app.localizedName {
+            return "on by \(name) (\(pid))"
+        }
+        return "on by pid \(pid)"
+    }
+
+    var eventTapDescription: String {
+        let diagnostics = eventTapDiagnostics
+        let last = diagnostics.lastEventType.map { type in
+            if let keyCode = diagnostics.lastKeyCode {
+                return " last \(type):\(keyCode)"
+            }
+            return " last \(type)"
+        } ?? ""
+        return "\(diagnostics.location.rawValue) tap=\(diagnostics.keyDownEvents) hid=\(diagnostics.hidKeyDownEvents) appG=\(diagnostics.appKitGlobalKeyDownEvents) appL=\(diagnostics.appKitLocalKeyDownEvents) flags=\(diagnostics.flagsChangedEvents) disabled=\(diagnostics.tapDisabledEvents)\(last)"
+    }
+
+    var todayWindowDescription: String {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? Date()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        return "\(formatter.string(from: start)) - \(formatter.string(from: end))"
     }
 
     init() {
@@ -87,6 +141,7 @@ final class LiteModel: ObservableObject {
         NSApplication.shared.activate(ignoringOtherApps: true)
         logger.log("request input monitoring access")
         _ = permissionChecker.requestInputMonitoringAccess()
+        openInputMonitoringSettings()
         startListeningIfAllowed()
         refresh()
     }
@@ -104,7 +159,16 @@ final class LiteModel: ObservableObject {
     }
 
     func refresh() {
-        permissionGranted = permissionChecker.status().inputMonitoringGranted || supervisor.status == .running
+        let permissions = permissionChecker.status()
+        inputMonitoringGranted = permissions.inputMonitoringGranted
+        accessibilityGranted = permissions.accessibilityGranted
+        permissionGranted = inputMonitoringGranted || supervisor.status == .running
+        eventTapDiagnostics = supervisor.diagnostics()
+        secureInputStatus = SecureInputChecker.status()
+        if secureInputDescription != lastLoggedSecureInputDescription {
+            lastLoggedSecureInputDescription = secureInputDescription
+            logger.log("secure input status \(secureInputDescription)")
+        }
         do {
             today = try store?.todayStats() ?? today
             topApps = try store?.topApps(limit: 3) ?? []
@@ -148,6 +212,7 @@ final class LiteModel: ObservableObject {
     func quit() {
         logger.log("quit requested liveTotal=\(liveTotalKeys) pending=\(pendingKeyCount)")
         flush()
+        stopListening()
         NSApplication.shared.terminate(nil)
     }
 
@@ -156,17 +221,51 @@ final class LiteModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([environment.logURL])
     }
 
-    private func startListeningIfAllowed() {
+    func restartTracking() {
+        logger.log("restart tracking requested status=\(listenerStatus) liveTotal=\(liveTotalKeys) pending=\(pendingKeyCount)")
+        flush()
+        stopListening()
+        startListeningIfAllowed(force: true)
+        refresh()
+        restartCount += 1
+        lastRestartAt = Date()
+        statusMessage = listenerStatus == "running" ? "Tracking restarted." : "Tracking restart failed: \(listenerStatus)."
+        logger.log("restart tracking completed status=\(listenerStatus) preflight=\(permissionChecker.status().inputMonitoringGranted)")
+    }
+
+    private func startListeningIfAllowed(force: Bool = false) {
+        if supervisor.status == .running && !force {
+            listenerStatus = "running"
+            permissionGranted = true
+            return
+        }
+
+        if force {
+            stopListening()
+        }
+
         let status = supervisor.start { [weak self] event in
             Task { @MainActor in
                 self?.record(event)
             }
         }
+        listenerStatus = status.rawValue
         permissionGranted = status == .running
-        logger.log("listener start status=\(status.rawValue) preflight=\(permissionChecker.status().inputMonitoringGranted)")
+        let permissions = permissionChecker.status()
+        inputMonitoringGranted = permissions.inputMonitoringGranted
+        accessibilityGranted = permissions.accessibilityGranted
+        eventTapDiagnostics = supervisor.diagnostics()
+        secureInputStatus = SecureInputChecker.status()
+        logger.log("listener eventtap start status=\(status.rawValue) preflight=\(permissionChecker.status().inputMonitoringGranted) tap=\(eventTapDescription) secureInput=\(secureInputDescription)")
         if status == .error {
             lastError = "Keyboard listener could not start."
         }
+    }
+
+    private func stopListening() {
+        supervisor.stop()
+        listenerStatus = "stopped"
+        eventTapDiagnostics = supervisor.diagnostics()
     }
 
     private func startTimers() {
@@ -198,6 +297,8 @@ final class LiteModel: ObservableObject {
             topApps = try store?.topApps(limit: 3) ?? []
             topKeys = try store?.topKeys(period: .today(), limit: 10) ?? []
             dailyUsage = try store?.dailyUsage(days: 7) ?? []
+            lastFlushAt = Date()
+            lastFlushEvents = eventCount
             if eventCount > 0 {
                 logger.log("flush events=\(eventCount) minuteBuckets=\(snapshot.minuteBuckets.count) keyBuckets=\(snapshot.keyUsageBuckets.count) detailEvents=\(snapshot.detailEvents.count) today=\(today.totalKeys)")
             }
@@ -210,6 +311,7 @@ final class LiteModel: ObservableObject {
     private func record(_ event: CapturedKeyEvent) {
         aggregator.record(event)
         pendingKeyCount += 1
+        lastEventAt = event.timestamp
         statusMessage = nil
         if pendingKeyCount == 1 || pendingKeyCount.isMultiple(of: 100) {
             logger.log("record pending=\(pendingKeyCount) liveTotal=\(liveTotalKeys)")
@@ -222,37 +324,90 @@ final class LiteModel: ObservableObject {
         }
         return "\(value)"
     }
+
 }
 
 struct LitePanel: View {
     @ObservedObject var model: LiteModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             if model.permissionGranted {
-                TodaySection(model: model)
-                TrendSection(days: model.dailyUsage)
-                TopAppsSection(apps: model.topApps)
-                TopKeysSection(keys: model.topKeys)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if !model.canTrackInBackground {
+                            BackgroundPermissionWarning(model: model)
+                        }
+                        TodaySection(model: model)
+                        TrendSection(days: model.dailyUsage)
+                        TopAppsSection(apps: model.topApps)
+                        TopKeysSection(keys: model.topKeys)
+                        DiagnosticsSection(model: model)
+
+                        if let message = model.statusMessage {
+                            Text(message)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let error = model.lastError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .lineLimit(3)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.trailing, 4)
+                }
+                .frame(maxHeight: 560)
                 SettingsSection(model: model)
             } else {
                 PermissionGuide(model: model)
-            }
 
-            if let message = model.statusMessage {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                if let message = model.statusMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-            if let error = model.lastError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(3)
+                if let error = model.lastError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(3)
+                }
             }
         }
         .padding(16)
+    }
+}
+
+struct BackgroundPermissionWarning: View {
+    @ObservedObject var model: LiteModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Background tracking needs permission", systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            HStack {
+                if !model.inputMonitoringGranted {
+                    Button("Input Monitoring") {
+                        model.requestPermission()
+                    }
+                }
+                Button("Refresh") {
+                    model.retryPermissionCheck()
+                }
+            }
+            Text("Right now Keystats can only count while this panel is open.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("If it still does not work after allowing Input Monitoring, remove Keystats from Input Monitoring and add it again.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -388,6 +543,13 @@ struct SettingsSection: View {
             .pickerStyle(.segmented)
 
             HStack {
+                Button("Restart Tracking") {
+                    model.restartTracking()
+                }
+                Spacer()
+            }
+
+            HStack {
                 Button("Clear Data", role: .destructive) {
                     model.clearData()
                 }
@@ -399,6 +561,55 @@ struct SettingsSection: View {
                     model.quit()
                 }
             }
+        }
+    }
+}
+
+struct DiagnosticsSection: View {
+    @ObservedObject var model: LiteModel
+
+    var body: some View {
+        DisclosureGroup("Diagnostics") {
+            VStack(alignment: .leading, spacing: 6) {
+                DiagnosticRow(label: "Input", value: model.inputMonitoringGranted ? "granted" : "missing")
+                DiagnosticRow(label: "Listener", value: model.listenerStatus)
+                DiagnosticRow(label: "Secure", value: model.secureInputDescription)
+                DiagnosticRow(label: "Events", value: model.eventTapDescription)
+                DiagnosticRow(label: "Today", value: model.todayWindowDescription)
+                DiagnosticRow(label: "Pending", value: "\(model.liveTotalKeys - model.today.totalKeys)")
+                DiagnosticRow(label: "Last key", value: format(model.lastEventAt))
+                DiagnosticRow(label: "Last flush", value: "\(format(model.lastFlushAt)) / \(model.lastFlushEvents)")
+                DiagnosticRow(label: "Restart", value: "\(format(model.lastRestartAt)) / \(model.restartCount)")
+                DiagnosticRow(label: "Database", value: model.databasePath)
+                DiagnosticRow(label: "Log", value: model.logPath)
+            }
+            .padding(.top, 6)
+        }
+    }
+
+    private func format(_ date: Date?) -> String {
+        guard let date else { return "none" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
+    }
+}
+
+struct DiagnosticRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+            Text(value)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
         }
     }
 }
@@ -428,7 +639,7 @@ struct PermissionGuide: View {
                     model.retryPermissionCheck()
                 }
             }
-            Text("If Keystats is already enabled, click Refresh. If it still stays here, quit Keystats and open it again.")
+            Text("If Keystats is already enabled but still cannot count, remove it from Input Monitoring and add it again.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

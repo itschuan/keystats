@@ -40,4 +40,5 @@ public struct PermissionChecker: PermissionChecking {
         return false
         #endif
     }
+
 }

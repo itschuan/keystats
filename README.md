@@ -4,11 +4,9 @@ Keystats is a local-first macOS keyboard usage statistics tool.
 
 It records aggregate keyboard activity on your Mac and shows lightweight usage stats such as today's total key count, top keys, top apps, and recent trends. Data is stored locally in SQLite under `~/.keystats`.
 
-## Products
+## Product
 
-### Keystats Lite
-
-Keystats Lite is the current primary user-facing app.
+Keystats Lite is a lightweight menu bar app.
 
 - macOS menu bar app
 - Real-time total key count in the menu bar
@@ -18,13 +16,8 @@ Keystats Lite is the current primary user-facing app.
 - Top 10 keys
 - Aggregate/detail mode switch
 - Local data clearing
+- Diagnostic log reveal action
 - Input Monitoring permission guide
-
-### Keystats CLI
-
-The CLI still exists as a Swift Package executable named `keystats`.
-
-It is useful for development, diagnostics, and command-line access to the same local data store. The CLI is not the main end-user experience right now; Keystats Lite is.
 
 ## Privacy
 
@@ -48,13 +41,7 @@ Keystats requires macOS Input Monitoring permission because global keyboard even
 Build the menu bar app executable:
 
 ```bash
-swift build -c release --product KeystatsLite
-```
-
-Build the CLI:
-
-```bash
-swift build -c release --product keystats
+swift build -c release
 ```
 
 Run tests:
@@ -69,14 +56,6 @@ Run Keystats Lite from SwiftPM:
 
 ```bash
 .build/release/KeystatsLite
-```
-
-Run the CLI:
-
-```bash
-.build/release/keystats help
-.build/release/keystats today
-.build/release/keystats keys --period today --limit 10
 ```
 
 ## Packaging A Local App
@@ -97,16 +76,9 @@ If the app is not listed automatically, add the `.app` bundle manually with the 
 Sources/
   KeystatsCore/   Shared keyboard listening, storage, aggregation, and analytics
   KeystatsLite/   SwiftUI menu bar app
-  keystats/       Command-line interface
 Tests/
   KeystatsCoreTests/
-  KeystatsCLITests/
 docs/
   core/
   lite/
-  cli/
 ```
-
-## Notes
-
-The CLI documentation is still kept because the CLI target still exists. If the CLI is removed in a future product decision, `docs/cli` should be removed or folded into developer documentation at the same time.
