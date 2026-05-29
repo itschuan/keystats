@@ -3,7 +3,7 @@
 📅 2026-05-29
 
 🐛 Bug Fixes
-`pending` `fix(lite)` Reduce verbose debug logging while keeping duplicate process cleanup diagnostics — itschuan
+`00ada49` `fix(lite)` Reduce verbose debug logging while keeping duplicate process cleanup diagnostics — itschuan
 `e7969eb` `fix(lite)` Remove legacy bundled CLI executables on startup to stop old background writers from respawning — itschuan
 `3dbd70e` `fix(lite)` Add a single-instance lock and terminate old Keystats app or CLI processes to prevent duplicate database writes — itschuan
 `74a917c` `fix(lite)` Remove HID/AppKit fallback listeners to avoid multi-channel duplicate counting — itschuan
