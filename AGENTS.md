@@ -131,6 +131,8 @@ Lite should depend on Core and should not duplicate Core storage or analytics lo
 - Read the relevant module docs before changing behavior.
 - Keep product, technical, development, automated test, and manual QA concerns in their matching files.
 - Keep shared logic in Core and product-specific UI/lifecycle logic in Lite.
+- Update `CHANGELOG.md` whenever a user-facing behavior, packaging behavior, permission flow, diagnostics output, or developer workflow changes.
+- Keep changelog entries grouped by date and category, using short commit hashes and the format shown in `CHANGELOG.md`.
 - If a task changes privacy behavior, update the relevant `product_design.md`, `tech_design.md`, and test task files.
 - If a task changes data storage, update Core tech design, Core tasks, and Core tests.
 - If a task changes App Store behavior, update Lite product design, Lite tech design, and Lite manual test tasks.

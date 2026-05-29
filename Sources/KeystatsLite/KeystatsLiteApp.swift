@@ -3,6 +3,18 @@ import Foundation
 import KeystatsCore
 import SwiftUI
 
+private enum LiteAppInfo {
+    static let version = "0.1.0"
+
+    static var displayVersion: String {
+        let bundleVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+        guard let bundleVersion, !bundleVersion.isEmpty else {
+            return "\(version) (dev)"
+        }
+        return "\(version) (\(bundleVersion))"
+    }
+}
+
 @main
 struct KeystatsLiteApp: App {
     @StateObject private var model = LiteModel()
@@ -81,6 +93,10 @@ final class LiteModel: ObservableObject {
         environment.logURL.path
     }
 
+    var appVersion: String {
+        LiteAppInfo.displayVersion
+    }
+
     var canTrackInBackground: Bool {
         inputMonitoringGranted
     }
@@ -104,7 +120,7 @@ final class LiteModel: ObservableObject {
             }
             return " last \(type)"
         } ?? ""
-        return "\(diagnostics.location.rawValue) tap=\(diagnostics.keyDownEvents) hid=\(diagnostics.hidKeyDownEvents) appG=\(diagnostics.appKitGlobalKeyDownEvents) appL=\(diagnostics.appKitLocalKeyDownEvents) flags=\(diagnostics.flagsChangedEvents) disabled=\(diagnostics.tapDisabledEvents)\(last)"
+        return "\(diagnostics.location.rawValue) keys=\(diagnostics.keyDownEvents) flags=\(diagnostics.flagsChangedEvents) disabled=\(diagnostics.tapDisabledEvents)\(last)"
     }
 
     var todayWindowDescription: String {
@@ -123,7 +139,7 @@ final class LiteModel: ObservableObject {
     func configure() {
         do {
             try environment.prepare()
-            logger.log("configure appVersion=0.1.0 database=\(environment.databaseURL.path)")
+            logger.log("configure appVersion=\(LiteAppInfo.version) database=\(environment.databaseURL.path)")
             store = try SQLiteDataStore(path: environment.databaseURL.path)
             mode = LiteConfig.load(from: environment.configURL).mode
             aggregator.setMode(mode)
@@ -332,54 +348,70 @@ struct LitePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if model.permissionGranted {
+            if model.canTrackInBackground {
+                ScrollView {
+                    PanelContent(model: model)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.trailing, 4)
+                }
+                .frame(height: 520)
+                .scrollIndicators(.hidden)
+                SettingsSection(model: model)
+            } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        if !model.canTrackInBackground {
+                        PermissionGuide(model: model)
+                        if model.permissionGranted {
                             BackgroundPermissionWarning(model: model)
                         }
-                        TodaySection(model: model)
-                        TrendSection(days: model.dailyUsage)
-                        TopAppsSection(apps: model.topApps)
-                        TopKeysSection(keys: model.topKeys)
                         DiagnosticsSection(model: model)
-
-                        if let message = model.statusMessage {
-                            Text(message)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if let error = model.lastError {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .lineLimit(3)
-                        }
+                        StatusMessages(model: model)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.trailing, 4)
                 }
-                .frame(maxHeight: 560)
+                .frame(height: 320)
+                .scrollIndicators(.hidden)
                 SettingsSection(model: model)
-            } else {
-                PermissionGuide(model: model)
-
-                if let message = model.statusMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let error = model.lastError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .lineLimit(3)
-                }
             }
         }
         .padding(16)
+    }
+}
+
+struct PanelContent: View {
+    @ObservedObject var model: LiteModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            TodaySection(model: model)
+            TrendSection(days: model.dailyUsage)
+            TopAppsSection(apps: model.topApps)
+            TopKeysSection(keys: model.topKeys)
+            DiagnosticsSection(model: model)
+            StatusMessages(model: model)
+        }
+    }
+}
+
+struct StatusMessages: View {
+    @ObservedObject var model: LiteModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let message = model.statusMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let error = model.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(3)
+            }
+        }
     }
 }
 
@@ -560,6 +592,13 @@ struct SettingsSection: View {
                 Button("Quit") {
                     model.quit()
                 }
+            }
+
+            HStack {
+                Spacer()
+                Text("Version \(model.appVersion)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
         }
     }
