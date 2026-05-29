@@ -3,6 +3,7 @@
 📅 2026-05-29
 
 🐛 Bug Fixes
+`pending` `fix(lite)` Remove legacy bundled CLI executables on startup to stop old background writers from respawning — itschuan
 `3dbd70e` `fix(lite)` Add a single-instance lock and terminate old Keystats app or CLI processes to prevent duplicate database writes — itschuan
 `74a917c` `fix(lite)` Remove HID/AppKit fallback listeners to avoid multi-channel duplicate counting — itschuan
 `3fe33e1` `fix(lite)` Stabilize Lite background tracking, fix local-day stats, improve permission diagnostics, and remove the deprecated CLI — itschuan

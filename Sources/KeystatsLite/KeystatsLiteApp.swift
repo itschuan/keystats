@@ -152,6 +152,7 @@ final class LiteModel: ObservableObject {
         do {
             try environment.prepare()
             logger.log("startup appVersion=\(LiteAppInfo.displayVersion) \(processDescription) executable=\(Bundle.main.executableURL?.path ?? "unknown") lock=\(environment.lockURL.path)")
+            removeLegacyBundledExecutables()
             instanceLock = try SingleInstanceLock(url: environment.lockURL, logger: logger)
             terminateOtherRunningInstances()
             logger.log("configure appVersion=\(LiteAppInfo.displayVersion) \(processDescription) executable=\(Bundle.main.executableURL?.path ?? "unknown") database=\(environment.databaseURL.path)")
@@ -166,6 +167,28 @@ final class LiteModel: ObservableObject {
             lastError = "\(error)"
             listenerStatus = "error"
             logger.log("configure failed error=\(error)")
+        }
+    }
+
+    private func removeLegacyBundledExecutables() {
+        guard let executableURL = Bundle.main.executableURL else { return }
+        let executableDirectory = executableURL.deletingLastPathComponent()
+        let currentExecutable = executableURL.standardizedFileURL.path
+        let legacyNames = ["keystats", "Keystats", "keystats-lite"]
+
+        for name in legacyNames {
+            let legacyURL = executableDirectory.appendingPathComponent(name)
+            let legacyPath = legacyURL.standardizedFileURL.path
+            guard legacyPath != currentExecutable,
+                  FileManager.default.fileExists(atPath: legacyPath) else {
+                continue
+            }
+            do {
+                try FileManager.default.removeItem(at: legacyURL)
+                logger.log("removed legacy bundled executable path=\(legacyPath)")
+            } catch {
+                logger.log("remove legacy bundled executable failed path=\(legacyPath) error=\(error)")
+            }
         }
     }
 
