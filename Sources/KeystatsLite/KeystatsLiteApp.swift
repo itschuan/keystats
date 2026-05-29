@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import KeystatsCore
 import SwiftUI
@@ -72,10 +73,15 @@ final class LiteModel: ObservableObject {
     private let permissionChecker = PermissionChecker()
     private let supervisor = EventTapSupervisor()
     private let aggregator = StatsAggregator()
+    private var instanceLock: SingleInstanceLock?
     private var store: SQLiteDataStore?
     private var refreshTimer: Timer?
     private var flushTimer: Timer?
     private var lastLoggedSecureInputDescription = ""
+    private var recordSequence = 0
+    private var flushSequence = 0
+    private var lastLoggedTodayTotal: Int?
+    private var lastProcessSweepAt: Date?
 
     var menuTitle: String {
         inputMonitoringGranted || accessibilityGranted ? compact(liveTotalKeys) : "Setup"
@@ -91,6 +97,12 @@ final class LiteModel: ObservableObject {
 
     var logPath: String {
         environment.logURL.path
+    }
+
+    var processDescription: String {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let bundleID = Bundle.main.bundleIdentifier ?? "unknown"
+        return "pid=\(pid) bundle=\(bundleID)"
     }
 
     var appVersion: String {
@@ -139,7 +151,10 @@ final class LiteModel: ObservableObject {
     func configure() {
         do {
             try environment.prepare()
-            logger.log("configure appVersion=\(LiteAppInfo.version) database=\(environment.databaseURL.path)")
+            logger.log("startup appVersion=\(LiteAppInfo.displayVersion) \(processDescription) executable=\(Bundle.main.executableURL?.path ?? "unknown") lock=\(environment.lockURL.path)")
+            instanceLock = try SingleInstanceLock(url: environment.lockURL, logger: logger)
+            terminateOtherRunningInstances()
+            logger.log("configure appVersion=\(LiteAppInfo.displayVersion) \(processDescription) executable=\(Bundle.main.executableURL?.path ?? "unknown") database=\(environment.databaseURL.path)")
             store = try SQLiteDataStore(path: environment.databaseURL.path)
             mode = LiteConfig.load(from: environment.configURL).mode
             aggregator.setMode(mode)
@@ -149,7 +164,63 @@ final class LiteModel: ObservableObject {
             startListeningIfAllowed()
         } catch {
             lastError = "\(error)"
+            listenerStatus = "error"
             logger.log("configure failed error=\(error)")
+        }
+    }
+
+    private func terminateOtherRunningInstances() {
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let bundleID = Bundle.main.bundleIdentifier
+        let scannedProcesses = KeystatsProcessScanner.runningKeystatsProcesses()
+        logger.log("process scan current=\(currentPID) found=\(scannedProcesses.map { "\($0.pid):\($0.path)" }.joined(separator: ","))")
+        let runningAppCandidates = NSWorkspace.shared.runningApplications.filter { app in
+            guard app.processIdentifier != currentPID else { return false }
+            if let bundleID, app.bundleIdentifier == bundleID {
+                return true
+            }
+            if app.executableURL.map({ KeystatsProcessScanner.isKeystatsPath($0.path) }) == true {
+                return true
+            }
+            if app.localizedName == "Keystats" || app.localizedName == "Keystats Lite" {
+                return true
+            }
+            return false
+        }
+
+        var terminatedPIDs = Set<pid_t>()
+        for app in runningAppCandidates {
+            terminatedPIDs.insert(app.processIdentifier)
+            logger.log("terminate duplicate instance pid=\(app.processIdentifier) bundle=\(app.bundleIdentifier ?? "unknown") name=\(app.localizedName ?? "unknown") executable=\(app.executableURL?.path ?? "unknown")")
+            app.terminate()
+        }
+
+        let backgroundCandidates = scannedProcesses
+            .filter { $0.pid != currentPID && !terminatedPIDs.contains($0.pid) }
+        for process in backgroundCandidates {
+            terminatedPIDs.insert(process.pid)
+            logger.log("terminate duplicate background process pid=\(process.pid) executable=\(process.path)")
+            kill(process.pid, SIGTERM)
+        }
+
+        guard !terminatedPIDs.isEmpty else { return }
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            let livePIDs = KeystatsProcessScanner.runningKeystatsProcesses()
+                .map(\.pid)
+                .filter { $0 != currentPID && terminatedPIDs.contains($0) }
+            if livePIDs.isEmpty { return }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+
+        for pid in terminatedPIDs where KeystatsProcessScanner.isRunning(pid: pid) {
+            logger.log("force terminate duplicate process pid=\(pid)")
+            kill(pid, SIGKILL)
+        }
+
+        for app in runningAppCandidates where !app.isTerminated {
+            logger.log("force terminate duplicate instance pid=\(app.processIdentifier)")
+            app.forceTerminate()
         }
     }
 
@@ -175,6 +246,7 @@ final class LiteModel: ObservableObject {
     }
 
     func refresh() {
+        sweepOtherProcessesIfNeeded()
         let permissions = permissionChecker.status()
         inputMonitoringGranted = permissions.inputMonitoringGranted
         accessibilityGranted = permissions.accessibilityGranted
@@ -186,16 +258,31 @@ final class LiteModel: ObservableObject {
             logger.log("secure input status \(secureInputDescription)")
         }
         do {
+            let previousToday = today.totalKeys
+            let previousPending = pendingKeyCount
             today = try store?.todayStats() ?? today
             topApps = try store?.topApps(limit: 3) ?? []
             topKeys = try store?.topKeys(period: .today(), limit: 10) ?? []
             dailyUsage = try store?.dailyUsage(days: 7) ?? []
             mode = LiteConfig.load(from: environment.configURL).mode
             aggregator.setMode(mode)
+            if lastLoggedTodayTotal != today.totalKeys || previousPending > 0 {
+                logger.log("refresh todayBefore=\(previousToday) todayAfter=\(today.totalKeys) pending=\(pendingKeyCount) live=\(liveTotalKeys) listener=\(listenerStatus)")
+                lastLoggedTodayTotal = today.totalKeys
+            }
         } catch {
             lastError = "\(error)"
             logger.log("refresh failed error=\(error)")
         }
+    }
+
+    private func sweepOtherProcessesIfNeeded() {
+        let now = Date()
+        if let lastProcessSweepAt, now.timeIntervalSince(lastProcessSweepAt) < 5 {
+            return
+        }
+        lastProcessSweepAt = now
+        terminateOtherRunningInstances()
     }
 
     func setMode(_ newMode: StatsMode) {
@@ -302,9 +389,17 @@ final class LiteModel: ObservableObject {
     }
 
     private func flush() {
+        flushSequence += 1
+        let sequence = flushSequence
+        let pendingBefore = pendingKeyCount
+        let todayBefore = today.totalKeys
+        let liveBefore = liveTotalKeys
         let snapshot = aggregator.drain()
         do {
             let eventCount = snapshot.minuteBuckets.reduce(0) { $0 + $1.totalKeys }
+            if eventCount > 0 || pendingBefore > 0 {
+                logger.log("flush#\(sequence) begin events=\(eventCount) pendingBefore=\(pendingBefore) todayBefore=\(todayBefore) liveBefore=\(liveBefore) minuteBuckets=\(snapshot.minuteBuckets.count) keyBuckets=\(snapshot.keyUsageBuckets.count)")
+            }
             try store?.upsertMinuteStats(snapshot.minuteBuckets)
             try store?.upsertKeyUsage(snapshot.keyUsageBuckets)
             try store?.insertKeyEvents(snapshot.detailEvents)
@@ -316,22 +411,24 @@ final class LiteModel: ObservableObject {
             lastFlushAt = Date()
             lastFlushEvents = eventCount
             if eventCount > 0 {
-                logger.log("flush events=\(eventCount) minuteBuckets=\(snapshot.minuteBuckets.count) keyBuckets=\(snapshot.keyUsageBuckets.count) detailEvents=\(snapshot.detailEvents.count) today=\(today.totalKeys)")
+                logger.log("flush#\(sequence) end events=\(eventCount) pendingAfter=\(pendingKeyCount) todayAfter=\(today.totalKeys) liveAfter=\(liveTotalKeys) detailEvents=\(snapshot.detailEvents.count)")
             }
         } catch {
             lastError = "\(error)"
-            logger.log("flush failed error=\(error)")
+            logger.log("flush#\(sequence) failed events=\(snapshot.minuteBuckets.reduce(0) { $0 + $1.totalKeys }) pendingBefore=\(pendingBefore) error=\(error)")
         }
     }
 
     private func record(_ event: CapturedKeyEvent) {
+        recordSequence += 1
+        let sequence = recordSequence
+        let pendingBefore = pendingKeyCount
+        let todayBefore = today.totalKeys
         aggregator.record(event)
         pendingKeyCount += 1
         lastEventAt = event.timestamp
         statusMessage = nil
-        if pendingKeyCount == 1 || pendingKeyCount.isMultiple(of: 100) {
-            logger.log("record pending=\(pendingKeyCount) liveTotal=\(liveTotalKeys)")
-        }
+        logger.log("record#\(sequence) keyCode=\(event.key.keyCode) key=\(event.key.keyName) category=\(event.key.category.rawValue) app=\(event.app.bundleID) pendingBefore=\(pendingBefore) pendingAfter=\(pendingKeyCount) today=\(todayBefore) liveAfter=\(liveTotalKeys)")
     }
 
     private func compact(_ value: Int) -> String {
@@ -724,8 +821,216 @@ struct LiteEnvironment {
         keystatsDirectory.appendingPathComponent("keystats-lite.log")
     }
 
+    var lockURL: URL {
+        keystatsDirectory.appendingPathComponent("keystats-lite.lock")
+    }
+
     func prepare() throws {
         try FileManager.default.createDirectory(at: keystatsDirectory, withIntermediateDirectories: true)
+    }
+}
+
+enum SingleInstanceLockError: Error, CustomStringConvertible {
+    case alreadyRunning
+    case openFailed(String)
+    case lockFailed(String)
+
+    var description: String {
+        switch self {
+        case .alreadyRunning:
+            return "Another Keystats instance is already running."
+        case .openFailed(let path):
+            return "Could not open lock file: \(path)"
+        case .lockFailed(let message):
+            return "Could not acquire app lock: \(message)"
+        }
+    }
+}
+
+enum KeystatsProcessScanner {
+    struct ProcessInfo {
+        let pid: pid_t
+        let path: String
+    }
+
+    static func runningKeystatsProcesses() -> [ProcessInfo] {
+        var processesByPID: [pid_t: ProcessInfo] = [:]
+
+        let byteCount = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
+        if byteCount > 0 {
+            let pidCount = Int(byteCount) / MemoryLayout<pid_t>.stride
+            var pids = [pid_t](repeating: 0, count: pidCount)
+            let actualByteCount = pids.withUnsafeMutableBytes { buffer in
+                proc_listpids(UInt32(PROC_ALL_PIDS), 0, buffer.baseAddress, Int32(buffer.count))
+            }
+            if actualByteCount > 0 {
+                let actualPIDCount = Int(actualByteCount) / MemoryLayout<pid_t>.stride
+                for pid in pids.prefix(actualPIDCount) {
+                    guard pid > 0,
+                          let path = processPath(pid: pid),
+                          isKeystatsPath(path) else {
+                        continue
+                    }
+                    processesByPID[pid] = ProcessInfo(pid: pid, path: path)
+                }
+            }
+        }
+
+        for pid in pgrepKeystatsPIDs() where processesByPID[pid] == nil {
+            let path = processPath(pid: pid)
+            let command = processCommand(pid: pid)
+            if isKeystatsPath(path) || isKeystatsCommand(command) {
+                processesByPID[pid] = ProcessInfo(pid: pid, path: path ?? command ?? "unknown")
+            }
+        }
+
+        return processesByPID.values.sorted { $0.pid < $1.pid }
+    }
+
+    static func isKeystatsPath(_ path: String?) -> Bool {
+        guard let path else { return false }
+        let lowercasedPath = path.lowercased()
+        let executableName = URL(fileURLWithPath: path).lastPathComponent.lowercased()
+        if ["keystatslite", "keystats", "keystats-lite"].contains(executableName) {
+            return true
+        }
+        return lowercasedPath.contains("/keystats.app/")
+            || lowercasedPath.contains("/keystats lite.app/")
+    }
+
+    static func isRunning(pid: pid_t) -> Bool {
+        processPath(pid: pid) != nil
+    }
+
+    static func processPath(pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4096)
+        let result = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard result > 0 else { return nil }
+        return String(cString: buffer)
+    }
+
+    private static func pgrepKeystatsPIDs() -> [pid_t] {
+        run("/usr/bin/pgrep", arguments: ["-if", "keystats"])
+            .split(whereSeparator: \.isNewline)
+            .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
+    }
+
+    private static func isKeystatsCommand(_ command: String?) -> Bool {
+        guard let command else { return false }
+        let lowercasedCommand = command.lowercased()
+        if lowercasedCommand.contains("/keystats.app/")
+            || lowercasedCommand.contains("/keystats lite.app/")
+            || lowercasedCommand.contains(".keystats/keystats.db")
+            || lowercasedCommand.contains("keystats.db") {
+            return true
+        }
+        let firstToken = lowercasedCommand.split(separator: " ").first.map(String.init)
+        guard let firstToken else { return false }
+        let executableName = URL(fileURLWithPath: firstToken).lastPathComponent
+        return ["keystatslite", "keystats", "keystats-lite"].contains(executableName)
+    }
+
+    private static func processCommand(pid: pid_t) -> String? {
+        let output = run("/bin/ps", arguments: ["-p", "\(pid)", "-o", "command="])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return output.isEmpty ? nil : output
+    }
+
+    private static func run(_ executable: String, arguments: [String]) -> String {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return ""
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+}
+
+final class SingleInstanceLock {
+    private let fileDescriptor: Int32
+
+    init(url: URL, logger: LiteLogger) throws {
+        logger.log("lock open path=\(url.path)")
+        fileDescriptor = open(url.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard fileDescriptor >= 0 else {
+            throw SingleInstanceLockError.openFailed(url.path)
+        }
+
+        guard Self.acquire(fileDescriptor, url: url, logger: logger) else {
+            let errorNumber = errno
+            close(fileDescriptor)
+            if errorNumber == EWOULDBLOCK {
+                throw SingleInstanceLockError.alreadyRunning
+            }
+            throw SingleInstanceLockError.lockFailed(String(cString: strerror(errorNumber)))
+        }
+
+        ftruncate(fileDescriptor, 0)
+        let pid = "\(ProcessInfo.processInfo.processIdentifier)\n"
+        _ = pid.withCString { write(fileDescriptor, $0, strlen($0)) }
+        logger.log("lock acquired path=\(url.path) pid=\(ProcessInfo.processInfo.processIdentifier)")
+    }
+
+    private static func acquire(_ fileDescriptor: Int32, url: URL, logger: LiteLogger) -> Bool {
+        if flock(fileDescriptor, LOCK_EX | LOCK_NB) == 0 {
+            return true
+        }
+
+        guard errno == EWOULDBLOCK,
+              let ownerPID = lockOwnerPID(url: url),
+              ownerPID != ProcessInfo.processInfo.processIdentifier,
+              isKeystatsProcess(pid: ownerPID) else {
+            return false
+        }
+
+        logger.log("terminate lock owner pid=\(ownerPID) executable=\(KeystatsProcessScanner.processPath(pid: pid_t(ownerPID)) ?? "unknown")")
+        kill(pid_t(ownerPID), SIGTERM)
+
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if flock(fileDescriptor, LOCK_EX | LOCK_NB) == 0 {
+                return true
+            }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+
+        logger.log("force terminate lock owner pid=\(ownerPID)")
+        kill(pid_t(ownerPID), SIGKILL)
+
+        let forceDeadline = Date().addingTimeInterval(1)
+        while Date() < forceDeadline {
+            if flock(fileDescriptor, LOCK_EX | LOCK_NB) == 0 {
+                return true
+            }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+
+        return false
+    }
+
+    private static func lockOwnerPID(url: URL) -> Int? {
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
+        }
+        return Int(contents.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func isKeystatsProcess(pid: Int) -> Bool {
+        guard let path = KeystatsProcessScanner.processPath(pid: pid_t(pid)) else { return false }
+        return URL(fileURLWithPath: path).lastPathComponent == "KeystatsLite"
+    }
+
+    deinit {
+        flock(fileDescriptor, LOCK_UN)
+        close(fileDescriptor)
     }
 }
 

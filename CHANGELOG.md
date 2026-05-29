@@ -2,37 +2,38 @@
 
 📅 2026-05-29
 
-🐛 Bug 修复
-`74a917c` `fix(lite)` 移除 HID/AppKit 兜底监听，避免多通道同时入账导致按键重复统计 — itschuan
-`3fe33e1` `fix(lite)` 稳定 Lite 后台监听、修复本地日期统计和权限诊断流程，并移除已废弃 CLI — itschuan
+🐛 Bug Fixes
+`pending` `fix(lite)` Add a single-instance lock and terminate old Keystats app or CLI processes to prevent duplicate database writes — itschuan
+`74a917c` `fix(lite)` Remove HID/AppKit fallback listeners to avoid multi-channel duplicate counting — itschuan
+`3fe33e1` `fix(lite)` Stabilize Lite background tracking, fix local-day stats, improve permission diagnostics, and remove the deprecated CLI — itschuan
 
-✨ 功能
-`74a917c` `feat(lite)` 在菜单面板显示版本号与 Git 短 SHA — itschuan
+✨ Features
+`74a917c` `feat(lite)` Show the app version and Git short SHA in the menu panel — itschuan
 
-📝 文档
-`74a917c` `docs` 新增 changelog 并要求后续变更维护发布记录 — itschuan
+📝 Documentation
+`74a917c` `docs` Add the changelog and require future user-facing changes to update release notes — itschuan
 
 📅 2026-05-28
 
-🐛 Bug 修复
-`484baeb` `fix(core,lite)` 修复本地日期聚合偏移，并为 Lite 增加诊断日志 — itschuan
+🐛 Bug Fixes
+`484baeb` `fix(core,lite)` Fix local-day aggregation offsets and add Lite diagnostics logging — itschuan
 
 📅 2026-05-26
 
-🐛 Bug 修复
-`460ac3e` `fix(lite)` 修复 Top 10 Keys 跨应用聚合重复显示问题 — itschuan
+🐛 Bug Fixes
+`460ac3e` `fix(lite)` Fix duplicate-looking Top 10 Keys rows by aggregating across apps correctly — itschuan
 
-📝 文档
-`0cdca9f` `docs` 新增项目 README — itschuan
+📝 Documentation
+`0cdca9f` `docs` Add the project README — itschuan
 
-✨ 功能
-`c626141` `feat(lite)` 新增 Keystats Lite 菜单栏应用 — itschuan
+✨ Features
+`c626141` `feat(lite)` Add the Keystats Lite menu bar app — itschuan
 
 📅 2026-05-25
 
-📝 文档
-`cadb065` `docs` 将模块文档翻译为英文 — itschuan
-`81a5d81` `docs` 整理项目文档结构 — itschuan
+📝 Documentation
+`cadb065` `docs` Translate module documentation to English — itschuan
+`81a5d81` `docs` Organize the project documentation structure — itschuan
 
-✨ 功能
-`1708884` `feat(core,cli)` 实现 Core 与早期 CLI 基础能力 — itschuan
+✨ Features
+`1708884` `feat(core,cli)` Implement the Core engine and early CLI foundation — itschuan
