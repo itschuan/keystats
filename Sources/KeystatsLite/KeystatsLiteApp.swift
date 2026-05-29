@@ -78,9 +78,6 @@ final class LiteModel: ObservableObject {
     private var refreshTimer: Timer?
     private var flushTimer: Timer?
     private var lastLoggedSecureInputDescription = ""
-    private var recordSequence = 0
-    private var flushSequence = 0
-    private var lastLoggedTodayTotal: Int?
     private var lastProcessSweepAt: Date?
 
     var menuTitle: String {
@@ -151,15 +148,14 @@ final class LiteModel: ObservableObject {
     func configure() {
         do {
             try environment.prepare()
-            logger.log("startup appVersion=\(LiteAppInfo.displayVersion) \(processDescription) executable=\(Bundle.main.executableURL?.path ?? "unknown") lock=\(environment.lockURL.path)")
+            logger.log("startup appVersion=\(LiteAppInfo.displayVersion) \(processDescription) executable=\(Bundle.main.executableURL?.path ?? "unknown")")
             removeLegacyBundledExecutables()
             instanceLock = try SingleInstanceLock(url: environment.lockURL, logger: logger)
             terminateOtherRunningInstances()
-            logger.log("configure appVersion=\(LiteAppInfo.displayVersion) \(processDescription) executable=\(Bundle.main.executableURL?.path ?? "unknown") database=\(environment.databaseURL.path)")
             store = try SQLiteDataStore(path: environment.databaseURL.path)
             mode = LiteConfig.load(from: environment.configURL).mode
             aggregator.setMode(mode)
-            logger.log("store opened mode=\(mode.rawValue)")
+            logger.log("store opened mode=\(mode.rawValue) database=\(environment.databaseURL.path)")
             refresh()
             startTimers()
             startListeningIfAllowed()
@@ -196,7 +192,6 @@ final class LiteModel: ObservableObject {
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let bundleID = Bundle.main.bundleIdentifier
         let scannedProcesses = KeystatsProcessScanner.runningKeystatsProcesses()
-        logger.log("process scan current=\(currentPID) found=\(scannedProcesses.map { "\($0.pid):\($0.path)" }.joined(separator: ","))")
         let runningAppCandidates = NSWorkspace.shared.runningApplications.filter { app in
             guard app.processIdentifier != currentPID else { return false }
             if let bundleID, app.bundleIdentifier == bundleID {
@@ -220,6 +215,9 @@ final class LiteModel: ObservableObject {
 
         let backgroundCandidates = scannedProcesses
             .filter { $0.pid != currentPID && !terminatedPIDs.contains($0.pid) }
+        if !runningAppCandidates.isEmpty || !backgroundCandidates.isEmpty {
+            logger.log("duplicate process scan current=\(currentPID) found=\(backgroundCandidates.map { "\($0.pid):\($0.path)" }.joined(separator: ","))")
+        }
         for process in backgroundCandidates {
             terminatedPIDs.insert(process.pid)
             logger.log("terminate duplicate background process pid=\(process.pid) executable=\(process.path)")
@@ -281,18 +279,12 @@ final class LiteModel: ObservableObject {
             logger.log("secure input status \(secureInputDescription)")
         }
         do {
-            let previousToday = today.totalKeys
-            let previousPending = pendingKeyCount
             today = try store?.todayStats() ?? today
             topApps = try store?.topApps(limit: 3) ?? []
             topKeys = try store?.topKeys(period: .today(), limit: 10) ?? []
             dailyUsage = try store?.dailyUsage(days: 7) ?? []
             mode = LiteConfig.load(from: environment.configURL).mode
             aggregator.setMode(mode)
-            if lastLoggedTodayTotal != today.totalKeys || previousPending > 0 {
-                logger.log("refresh todayBefore=\(previousToday) todayAfter=\(today.totalKeys) pending=\(pendingKeyCount) live=\(liveTotalKeys) listener=\(listenerStatus)")
-                lastLoggedTodayTotal = today.totalKeys
-            }
         } catch {
             lastError = "\(error)"
             logger.log("refresh failed error=\(error)")
@@ -301,7 +293,7 @@ final class LiteModel: ObservableObject {
 
     private func sweepOtherProcessesIfNeeded() {
         let now = Date()
-        if let lastProcessSweepAt, now.timeIntervalSince(lastProcessSweepAt) < 5 {
+        if let lastProcessSweepAt, now.timeIntervalSince(lastProcessSweepAt) < 10 {
             return
         }
         lastProcessSweepAt = now
@@ -412,17 +404,10 @@ final class LiteModel: ObservableObject {
     }
 
     private func flush() {
-        flushSequence += 1
-        let sequence = flushSequence
         let pendingBefore = pendingKeyCount
-        let todayBefore = today.totalKeys
-        let liveBefore = liveTotalKeys
         let snapshot = aggregator.drain()
         do {
             let eventCount = snapshot.minuteBuckets.reduce(0) { $0 + $1.totalKeys }
-            if eventCount > 0 || pendingBefore > 0 {
-                logger.log("flush#\(sequence) begin events=\(eventCount) pendingBefore=\(pendingBefore) todayBefore=\(todayBefore) liveBefore=\(liveBefore) minuteBuckets=\(snapshot.minuteBuckets.count) keyBuckets=\(snapshot.keyUsageBuckets.count)")
-            }
             try store?.upsertMinuteStats(snapshot.minuteBuckets)
             try store?.upsertKeyUsage(snapshot.keyUsageBuckets)
             try store?.insertKeyEvents(snapshot.detailEvents)
@@ -434,24 +419,19 @@ final class LiteModel: ObservableObject {
             lastFlushAt = Date()
             lastFlushEvents = eventCount
             if eventCount > 0 {
-                logger.log("flush#\(sequence) end events=\(eventCount) pendingAfter=\(pendingKeyCount) todayAfter=\(today.totalKeys) liveAfter=\(liveTotalKeys) detailEvents=\(snapshot.detailEvents.count)")
+                logger.log("flush events=\(eventCount) pendingBefore=\(pendingBefore) minuteBuckets=\(snapshot.minuteBuckets.count) keyBuckets=\(snapshot.keyUsageBuckets.count) today=\(today.totalKeys)")
             }
         } catch {
             lastError = "\(error)"
-            logger.log("flush#\(sequence) failed events=\(snapshot.minuteBuckets.reduce(0) { $0 + $1.totalKeys }) pendingBefore=\(pendingBefore) error=\(error)")
+            logger.log("flush failed events=\(snapshot.minuteBuckets.reduce(0) { $0 + $1.totalKeys }) pendingBefore=\(pendingBefore) error=\(error)")
         }
     }
 
     private func record(_ event: CapturedKeyEvent) {
-        recordSequence += 1
-        let sequence = recordSequence
-        let pendingBefore = pendingKeyCount
-        let todayBefore = today.totalKeys
         aggregator.record(event)
         pendingKeyCount += 1
         lastEventAt = event.timestamp
         statusMessage = nil
-        logger.log("record#\(sequence) keyCode=\(event.key.keyCode) key=\(event.key.keyName) category=\(event.key.category.rawValue) app=\(event.app.bundleID) pendingBefore=\(pendingBefore) pendingAfter=\(pendingKeyCount) today=\(todayBefore) liveAfter=\(liveTotalKeys)")
     }
 
     private func compact(_ value: Int) -> String {
@@ -981,7 +961,6 @@ final class SingleInstanceLock {
     private let fileDescriptor: Int32
 
     init(url: URL, logger: LiteLogger) throws {
-        logger.log("lock open path=\(url.path)")
         fileDescriptor = open(url.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard fileDescriptor >= 0 else {
             throw SingleInstanceLockError.openFailed(url.path)
@@ -999,7 +978,6 @@ final class SingleInstanceLock {
         ftruncate(fileDescriptor, 0)
         let pid = "\(ProcessInfo.processInfo.processIdentifier)\n"
         _ = pid.withCString { write(fileDescriptor, $0, strlen($0)) }
-        logger.log("lock acquired path=\(url.path) pid=\(ProcessInfo.processInfo.processIdentifier)")
     }
 
     private static func acquire(_ fileDescriptor: Int32, url: URL, logger: LiteLogger) -> Bool {
