@@ -3,14 +3,14 @@
 📅 2026-05-29
 
 🐛 Bug 修复
-`pending` `fix(lite)` 移除 HID/AppKit 兜底监听，避免多通道同时入账导致按键重复统计 — itschuan
+`74a917c` `fix(lite)` 移除 HID/AppKit 兜底监听，避免多通道同时入账导致按键重复统计 — itschuan
 `3fe33e1` `fix(lite)` 稳定 Lite 后台监听、修复本地日期统计和权限诊断流程，并移除已废弃 CLI — itschuan
 
 ✨ 功能
-`pending` `feat(lite)` 在菜单面板显示版本号与 Git 短 SHA — itschuan
+`74a917c` `feat(lite)` 在菜单面板显示版本号与 Git 短 SHA — itschuan
 
 📝 文档
-`pending` `docs` 新增 changelog 并要求后续变更维护发布记录 — itschuan
+`74a917c` `docs` 新增 changelog 并要求后续变更维护发布记录 — itschuan
 
 📅 2026-05-28
 
